@@ -36,7 +36,8 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .title(title)
         .borders(Borders::ALL)
         .style(styles::panel_style(&app.theme))
-        .border_style(styles::border_style(&app.theme, focused));
+        .border_style(styles::border_style(&app.theme, focused))
+        .border_type(styles::pane_border_type(focused));
 
     // Bottom border doubles as the filter status / prompt line. Using a
     // block title instead of reserving an inner row keeps the list geometry
@@ -418,7 +419,7 @@ mod tests {
             .unwrap();
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("▼ app/src/main/kotlin/"), "{text}");
-        assert!(text.contains("│  ▢ M Editor.kt"), "{text}");
+        assert!(text.contains("┃  ▢ M Editor.kt"), "{text}");
         app.collapse_all_dirs();
         terminal
             .draw(|frame| super::render_file_list(frame, &mut app, frame.area()))

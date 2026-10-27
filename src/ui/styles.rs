@@ -1,4 +1,5 @@
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::BorderType;
 
 use crate::model::LineOrigin;
 use crate::theme::Theme;
@@ -78,6 +79,16 @@ pub fn border_style(theme: &Theme, focused: bool) -> Style {
         Style::default().fg(theme.border_focused)
     } else {
         Style::default().fg(theme.border_unfocused)
+    }
+}
+
+/// Heavy lines mark the focused pane by shape, so focus stays visible in
+/// themes whose focused and unfocused border colors are close.
+pub fn pane_border_type(focused: bool) -> BorderType {
+    if focused {
+        BorderType::Thick
+    } else {
+        BorderType::Plain
     }
 }
 

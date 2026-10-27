@@ -17,7 +17,8 @@ pub(super) fn render_inline_commit_selector(frame: &mut Frame, app: &mut App, ar
         .title(" Commits ")
         .borders(Borders::ALL)
         .style(styles::panel_style(theme))
-        .border_style(styles::border_style(theme, focused));
+        .border_style(styles::border_style(theme, focused))
+        .border_type(styles::pane_border_type(focused));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);

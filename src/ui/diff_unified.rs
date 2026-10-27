@@ -54,7 +54,8 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     let mut block = Block::default()
         .borders(if sole { Borders::NONE } else { Borders::ALL })
         .style(styles::panel_style(&app.theme))
-        .border_style(styles::border_style(&app.theme, focused));
+        .border_style(styles::border_style(&app.theme, focused))
+        .border_type(styles::pane_border_type(focused));
     if !sole {
         block = block
             .title(crate::ui::diff_view::diff_title(app, area.width))
@@ -2245,7 +2246,9 @@ mod remote_comments_snapshot_tests {
             let col = row[..byte_col].chars().count();
             let gutter: String = cells[..col].concat();
             assert!(
-                gutter.chars().all(|c| c.is_whitespace() || c == '│'),
+                gutter
+                    .chars()
+                    .all(|c| c.is_whitespace() || c == '│' || c == '┃'),
                 "commit message row {y} should have no line number, got gutter {gutter:?}"
             );
         }

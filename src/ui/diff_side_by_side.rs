@@ -386,7 +386,8 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
     let mut block = Block::default()
         .borders(if sole { Borders::NONE } else { Borders::ALL })
         .style(styles::panel_style(&app.theme))
-        .border_style(styles::border_style(&app.theme, focused));
+        .border_style(styles::border_style(&app.theme, focused))
+        .border_type(styles::pane_border_type(focused));
     if !sole {
         block = block
             .title(crate::ui::diff_view::diff_title(app, area.width))
