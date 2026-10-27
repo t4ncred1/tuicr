@@ -8,7 +8,6 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, FileTreeItem, FocusedPanel};
-use crate::ui::diff_view::apply_horizontal_scroll;
 use crate::ui::styles;
 
 const EXPANDED_GLYPH: &str = "\u{25bc}"; // ▼
@@ -161,11 +160,7 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 }
             };
 
-            ListItem::new(if app.compact_folders {
-                scroll_compact_row(line, scroll_x)
-            } else {
-                apply_horizontal_scroll(line, scroll_x)
-            })
+            ListItem::new(scroll_row(line, scroll_x))
         })
         .collect();
 
@@ -190,9 +185,11 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Compact paths are measured in terminal columns; pan by the same unit,
-/// preserving grapheme clusters and padding a partially clipped wide glyph.
-fn scroll_compact_row(line: Line<'_>, mut columns: usize) -> Line<'_> {
+/// Rows are measured in terminal columns; pan by the same unit, preserving
+/// grapheme clusters and padding a partially clipped wide glyph. Indentation
+/// pans with the rest of the row, unlike the diff's `apply_horizontal_scroll`,
+/// which pins its first span as a cursor indicator.
+fn scroll_row(line: Line<'_>, mut columns: usize) -> Line<'_> {
     if columns == 0 {
         return line;
     }
@@ -403,10 +400,10 @@ mod tests {
         use ratatui::text::Line;
         let line = Line::from("界e\u{301}/next");
         assert_eq!(
-            super::scroll_compact_row(line.clone(), 1).to_string(),
+            super::scroll_row(line.clone(), 1).to_string(),
             " e\u{301}/next"
         );
-        assert_eq!(super::scroll_compact_row(line, 3).to_string(), "/next");
+        assert_eq!(super::scroll_row(line, 3).to_string(), "/next");
     }
 
     #[test]
@@ -452,6 +449,25 @@ mod tests {
         );
         let text = buffer_text(terminal.backend().buffer());
         assert!(text.contains("long_directory/"), "{text}");
+    }
+
+    #[test]
+    fn should_pan_indentation_with_the_row_when_scrolling_a_nested_tree() {
+        let mut app = app_with(&["a/b/c/d/e/f/LongFileName.rs"]);
+        let mut terminal = Terminal::new(TestBackend::new(20, 10)).unwrap();
+        terminal
+            .draw(|frame| super::render_file_list(frame, &mut app, frame.area()))
+            .unwrap();
+        let unscrolled = buffer_text(terminal.backend().buffer());
+        app.file_list_state.scroll_x = usize::MAX;
+        terminal
+            .draw(|frame| super::render_file_list(frame, &mut app, frame.area()))
+            .unwrap();
+
+        let scrolled = buffer_text(terminal.backend().buffer());
+
+        assert!(!unscrolled.contains("LongFileName.rs"), "{unscrolled}");
+        assert!(scrolled.contains("LongFileName.rs"), "{scrolled}");
     }
 
     #[test]
