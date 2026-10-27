@@ -206,6 +206,21 @@ Paste it back to any coding agent (Claude, Codex, Cursor, etc).
 For an agent-driven workflow where your agent opens tuicr in a cmux, tmux, Zellij, or
 Herdr split pane, see [skills/tuicr/SKILL.md](skills/tuicr/SKILL.md).
 
+To skip the paste, set `send_command` in your [config](docs/CONFIG.md) and run `:send`: tuicr
+pipes the same markdown into that command's stdin, without leaving the review. For example, a
+script that pastes it into the agent's tmux pane:
+
+```bash
+#!/bin/sh
+# ~/.local/bin/tuicr-to-agent: send_command = "tuicr-to-agent"
+tmux load-buffer -b tuicr - &&
+  tmux paste-buffer -p -d -b tuicr -t "${AGENT_PANE:-agent}" &&
+  tmux send-keys -t "${AGENT_PANE:-agent}" Enter
+```
+
+With `send_clears_comments = true`, sent comments are cleared (reviewed marks stay), so the next
+`:send` carries only new feedback. Reload with `:e` to review the agent's changes.
+
 ### To stdout
 
 Run with `--stdout` to pipe the markdown to another process:

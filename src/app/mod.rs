@@ -1168,6 +1168,10 @@ pub struct App {
     pub diff_source: DiffSource,
     pub pending_editor_target: Option<EditorTarget>,
     pub editor_override: Option<String>,
+    /// Command that `:send` pipes the review markdown into.
+    pub send_command: Option<String>,
+    /// Clear comments (keeping reviewed marks) after a successful `:send`.
+    pub send_clears_comments: bool,
     /// Windowed editors that have not exited yet; polled by
     /// `poll_editor_launches`.
     pub(crate) editor_launches: Vec<EditorLaunch>,

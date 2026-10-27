@@ -26,6 +26,9 @@ pub enum TuicrError {
     #[error("Clipboard error: {0}")]
     Clipboard(String),
 
+    #[error("Send failed: {0}")]
+    Send(String),
+
     #[error("VCS command failed: {0}")]
     VcsCommand(String),
 

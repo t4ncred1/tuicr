@@ -39,6 +39,8 @@ mouse = true
 mouse_scroll_lines = 3
 leader = ","
 editor = "nvim"
+send_command = "tuicr-to-agent"
+send_clears_comments = true
 comment_vim = false
 q_quits = false
 comment_tab_width = 4
@@ -106,6 +108,8 @@ session_header = true
 | `mouse_scroll_lines`       | `3`          | Lines scrolled per mouse wheel tick in the diff, file list, comment list, help, and summary views; the commit list moves its cursor this many rows. Must be between 1 and 100; other values are ignored with a startup warning. |
 | `leader`                   | `;`          | Single-character prefix for panel focus, sidebar toggles, and review-comment shortcuts. Invalid multi-character values are ignored with a startup warning. |
 | `editor`                   | `$EDITOR`    | Editor command for the `e` / `:edit` handoff, split with shell-like quoting rules (e.g. `"code -w"`). Falls back to `$EDITOR`, then `vi`. |
+| `send_command`             | unset        | Command `:send` pipes the review markdown into (stdin), split with shell-like quoting rules and run without a shell. It runs synchronously, so it should hand the text off and exit. `:send` warns when unset. |
+| `send_clears_comments`     | `false`      | Clear comments (keeping reviewed marks) after `send_command` exits successfully, so the next `:send` carries only new feedback. |
 | `comment_vim`              | `false`      | Vim modal editing in the comment box; toggle at runtime with `:vim`. When off, default emacs/readline bindings.                                            |
 | `q_quits`                  | `false`      | Restore bare `q` as a quit key in review modes. `:q`, `ZZ`, and `ZQ` work regardless of this setting.                                                     |
 | `comment_tab_width`        | `4`          | Spaces inserted by Tab while typing in the vim comment box (Insert mode).                                                                                  |

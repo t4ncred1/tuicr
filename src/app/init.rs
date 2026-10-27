@@ -495,6 +495,8 @@ impl App {
             diff_source,
             pending_editor_target: None,
             editor_override: None,
+            send_command: None,
+            send_clears_comments: false,
             editor_launches: Vec::new(),
             input_mode,
             focused_panel: FocusedPanel::Diff,

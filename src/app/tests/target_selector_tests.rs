@@ -3050,3 +3050,74 @@ fn pr_open_landing_mid_delete_prompt_drops_the_prompt() {
     assert_eq!(app.input_mode, InputMode::Normal);
     assert_eq!(app.pending_confirm, None);
 }
+
+fn run_command(app: &mut App, cmd: &str) {
+    app.input_mode = InputMode::Command;
+    app.command_buffer = cmd.to_string();
+    crate::handler::handle_command_action(app, crate::input::Action::SubmitInput);
+}
+
+fn add_review_comment(app: &mut App, content: &str) {
+    app.session.review_comments.push(crate::model::Comment::new(
+        content.to_string(),
+        crate::model::CommentType::None,
+        None,
+    ));
+}
+
+#[test]
+fn should_warn_when_send_has_no_command_configured() {
+    // given
+    let mut app = build_app();
+    add_review_comment(&mut app, "Looks off");
+
+    // when
+    run_command(&mut app, "send");
+
+    // then
+    let msg = app.message.as_ref().expect("expected warning message");
+    assert_eq!(msg.content, "No send_command configured");
+    assert_eq!(msg.message_type, MessageType::Warning);
+    assert!(app.session.has_comments());
+}
+
+#[cfg(unix)]
+#[test]
+fn should_send_review_and_clear_comments_when_configured() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("review.md");
+    let mut app = build_app();
+    app.send_command = Some(format!("sh -c 'cat > \"$0\"' {}", out.display()));
+    app.send_clears_comments = true;
+    add_review_comment(&mut app, "Rename this module");
+
+    // when
+    run_command(&mut app, "send");
+
+    // then
+    let sent = std::fs::read_to_string(&out).unwrap();
+    assert!(sent.contains("Rename this module"));
+    assert!(!app.session.has_comments());
+    assert_eq!(app.input_mode, InputMode::Normal);
+    let msg = app.message.as_ref().expect("expected info message");
+    assert_eq!(msg.content, "Review sent to sh");
+}
+
+#[cfg(unix)]
+#[test]
+fn should_keep_comments_when_send_command_fails() {
+    // given
+    let mut app = build_app();
+    app.send_command = Some("sh -c 'exit 1'".to_string());
+    app.send_clears_comments = true;
+    add_review_comment(&mut app, "Keep me");
+
+    // when
+    run_command(&mut app, "send");
+
+    // then
+    assert!(app.session.has_comments());
+    let msg = app.message.as_ref().expect("expected error message");
+    assert_eq!(msg.message_type, MessageType::Error);
+}

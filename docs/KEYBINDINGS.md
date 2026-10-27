@@ -229,6 +229,7 @@ In command mode,
 | `:e` (`:reload`) | Reload diff files |
 | `:edit` | Open focused file in `$EDITOR` |
 | `:clip` (`:export`) | Copy review to clipboard |
+| `:send` | Pipe review to the configured `send_command` (e.g. a script that hands it to your agent) |
 | `:copy-url` | Copy the open PR URL to clipboard (PR mode) |
 | `:summary` | Show all pending local-draft comments; `j`/`k` select and `Enter` jumps |
 | `:diff` | Toggle diff view (unified / side-by-side) |
