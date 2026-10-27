@@ -951,6 +951,31 @@ impl App {
         false
     }
 
+    /// Start a reply to the comment under the cursor. It reuses the edit
+    /// lookup for the comment's location, then clears the buffer so the
+    /// input composes a new reply. Returns false when no comment is there.
+    pub fn enter_reply_mode(&mut self) -> bool {
+        if !self.enter_edit_mode(true) {
+            return false;
+        }
+        self.replying_to_comment = true;
+        self.comment_buffer.clear();
+        self.comment_cursor = 0;
+        true
+    }
+
+    /// What the inline input box for `comment` is composing.
+    pub fn comment_input_kind<'a>(
+        &self,
+        comment: &'a Comment,
+    ) -> crate::ui::comment_panel::CommentInputKind<'a> {
+        if self.replying_to_comment {
+            crate::ui::comment_panel::CommentInputKind::Reply(comment)
+        } else {
+            crate::ui::comment_panel::CommentInputKind::Edit
+        }
+    }
+
     pub fn enter_comment_mode(&mut self, file_level: bool, line: Option<(u32, LineSide)>) {
         self.input_mode = InputMode::Comment;
         if self.diff_view_mode != DiffViewMode::SideBySide {
@@ -987,6 +1012,7 @@ impl App {
         self.comment_vim_pending = CommentVimPending::None;
         self.comment_is_review_level = false;
         self.editing_comment_id = None;
+        self.replying_to_comment = false;
         self.comment_line_range = None;
     }
 
@@ -1001,8 +1027,20 @@ impl App {
         let mut message = "Error: Could not save comment".to_string();
         let mut autosave_error = None;
 
+        if self.replying_to_comment
+            && let Some(comment_id) = &self.editing_comment_id
+        {
+            message = match add_reply_to_session(
+                &mut self.session,
+                comment_id,
+                content,
+                self.username.clone(),
+            ) {
+                Ok(_) => "Reply added".to_string(),
+                Err(e) => format!("Error: Could not save reply: {e}"),
+            };
         // Check if we're editing an existing comment
-        if let Some(editing_id) = &self.editing_comment_id {
+        } else if let Some(editing_id) = &self.editing_comment_id {
             if let Some(comment) = self
                 .session
                 .review_comments

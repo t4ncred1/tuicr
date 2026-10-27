@@ -11,7 +11,7 @@ use crate::error::{Result, TuicrError};
 use crate::forge::remote_comments::{
     PrCommentsVisibility, RemoteReviewThread, filter_threads, group_threads_by_path,
 };
-use crate::model::{CommentType, LineRange, LineSide, ReviewSession};
+use crate::model::{CommentReply, CommentType, LineRange, LineSide, ReviewSession};
 use crate::process::{CommandOutputErrorKind, run_command_output_with_stdin};
 use crate::slug::short_sha;
 /// (file_path, line_range, side, comment_type, content, commit_id)
@@ -22,6 +22,7 @@ type CommentEntry<'a> = (
     String,
     &'a str,
     Option<&'a str>,
+    &'a [CommentReply],
 );
 
 /// Generate markdown content from the review session.
@@ -394,6 +395,7 @@ fn generate_markdown(
             export_comment_type_label(&comment.comment_type, comment_types),
             &comment.content,
             None,
+            &comment.replies,
         ));
     }
 
@@ -413,6 +415,7 @@ fn generate_markdown(
                 export_comment_type_label(&comment.comment_type, comment_types),
                 &comment.content,
                 comment.commit_id.as_deref(),
+                &comment.replies,
             ));
         }
 
@@ -433,6 +436,7 @@ fn generate_markdown(
                     export_comment_type_label(&comment.comment_type, comment_types),
                     &comment.content,
                     comment.commit_id.as_deref(),
+                    &comment.replies,
                 ));
             }
         }
@@ -449,7 +453,7 @@ fn generate_markdown(
         }
         local_section_written = true;
     }
-    for (i, (file, line_range, side, comment_type, content, commit_id)) in
+    for (i, (file, line_range, side, comment_type, content, commit_id, replies)) in
         all_comments.iter().enumerate()
     {
         let number = i + 1;
@@ -493,6 +497,15 @@ fn generate_markdown(
         );
         for line in content_lines {
             let _ = writeln!(md, "{continuation_indent}{line}");
+        }
+        // Same `- @author - body` shape as remote thread replies below.
+        for reply in replies.iter() {
+            let mut reply_lines = reply.content.split('\n').map(|l| l.trim_end_matches('\r'));
+            let first = reply_lines.next().unwrap_or_default();
+            let _ = writeln!(md, "{continuation_indent}- @{} - {first}", reply.author);
+            for line in reply_lines {
+                let _ = writeln!(md, "{continuation_indent}  {line}");
+            }
         }
     }
 
@@ -1189,6 +1202,35 @@ mod tests {
 
         assert!(markdown
             .contains("`Review Comment (scope: working tree changes)` - Please split this into smaller commits"));
+    }
+
+    #[test]
+    fn should_export_replies_under_their_comment() {
+        let mut session = create_test_session();
+        let mut comment = Comment::new(
+            "Why a Vec here?".to_string(),
+            CommentType::from_id("note"),
+            None,
+        );
+        comment.replies = vec![crate::model::CommentReply::new(
+            "Order matters.\nSee the caller.".to_string(),
+            "Claude",
+        )];
+        session.review_comments.push(comment);
+
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &comment_types(),
+            &ExportConfig::default(),
+            &[],
+            None,
+        );
+
+        assert!(
+            markdown.contains("   - @Claude - Order matters.\n     See the caller.\n"),
+            "{markdown}"
+        );
     }
 
     #[test]

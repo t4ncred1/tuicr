@@ -198,12 +198,13 @@ Repository-managed agent integrations:
 
 - Persisted review state with `files: HashMap<PathBuf, FileReview>`
 - Each `FileReview` has: `reviewed: bool`, `reviewed_hunks: BTreeSet<String>`, `file_comments: Vec<Comment>`, `line_comments: HashMap<u32, Vec<Comment>>`
+- `Comment::replies: Vec<CommentReply>` holds a comment's thread, oldest first. Replies live *inside* their comment, not beside it, so every loop over a file's comments (submit preflight, counts, navigation, commit filtering) sees only the comment itself. They are local-only: `build_inline_body`/`build_review_body` read `comment.content` and never the thread (pinned by `should_never_post_local_replies_to_the_forge`). `App::comment_display_lines` counts reply rows and must stay in step with `format_comment_lines`. The external-session merge compares comments with replies stripped and then merges threads by reply id (`merge_replies`), so a local reply and an agent's reply to the same comment both survive.
 
 **ReviewStore** (`src/review_store.rs`):
 
 - Public library facade for persisted review sessions
 - Methods: `list_sessions_for_repo()`, `get_review()`, `add_comment()`, `save_review()`, `delete_review()`
-- Shared primitive: `add_comment_to_session()` is used by both the library facade and `App::save_comment()`
+- Shared primitive: `add_comment_to_session()` is used by both the library facade and `App::save_comment()`; `add_reply_to_session()` is the same for replies (`ReviewStore::add_reply`, `review add --reply-to`, and `a` in the TUI). `delete_comment` also accepts a reply id.
 
 **Action** (`src/input/keybindings.rs`):
 

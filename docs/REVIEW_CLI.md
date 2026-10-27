@@ -102,6 +102,26 @@ Target flags:
 - use `--username <name>` to identify the comment author; otherwise tuicr uses
   the configured `username` or `"user"`
 
+## Reply to a comment
+
+Answer an existing comment with `--reply-to <id>`, using the `id` from
+`tuicr review comments`:
+
+```bash
+tuicr review add --session agavra/tuicr@main/worktree \
+  --reply-to 79c9b3e1-0a7a-4efe-9d43-f7085d7c1a82 \
+  --username Claude \
+  "Handled: the empty case now returns early."
+```
+
+A reply has no location or type of its own: it belongs to the comment it
+answers and shows inside that comment's box in the TUI (press `a` on a comment
+to reply from there). So `--reply-to` cannot be combined with `--target-file`,
+`--type`, or `--input`. Replies are local-only: they are exported with `:clip`
+and `:send` but never posted to a forge by `:submit`. A thread's last reply
+tells you who spoke last, which is how an agent can tell an answered comment
+from one still waiting.
+
 ## Delete and clear comments
 
 Delete one comment by id:
@@ -110,8 +130,9 @@ Delete one comment by id:
 tuicr review delete --session agavra/tuicr@main/worktree --comment-id <id>
 ```
 
-The id is the `id` field reported by `tuicr review comments`. Deleting a
-comment that does not exist is an error.
+The id is the `id` field reported by `tuicr review comments`. A reply's `id`
+works too and removes just that reply; deleting a comment removes its replies
+with it. Deleting an id that does not exist is an error.
 
 Clear every comment in a session:
 
@@ -244,3 +265,20 @@ PR slug:
 
 The `author` field is the username stored with the comment. It is present in
 the JSON emitted by both `review add` and `review comments`.
+
+A comment that has replies carries them in a `replies` array, oldest first; the
+field is omitted when there are none:
+
+```json
+"replies": [
+  {
+    "id": "4d0f2a8e-6f0b-4c55-9a3e-2b1f0e7c9d11",
+    "comment_id": "79c9b3e1-0a7a-4efe-9d43-f7085d7c1a82",
+    "author": "Claude",
+    "created_at": "2026-05-22T17:25:00Z",
+    "content": "Handled: the empty case now returns early."
+  }
+]
+```
+
+`review add --reply-to` prints that same reply object.

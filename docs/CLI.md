@@ -17,7 +17,7 @@ Related references: [CONFIG.md](CONFIG.md) for the config file and themes,
 | `tuicr pr <target>` (`tuicr mr`) | Review a pull request / merge request |
 | `tuicr tui pr <target>` (`tuicr tui mr`) | Same, under the explicit TUI subcommand |
 | `tuicr review list` | List persisted review sessions |
-| `tuicr review add` | Add a local draft comment to a session |
+| `tuicr review add` | Add a local draft comment to a session, or a reply with `--reply-to <id>` |
 | `tuicr review comments` (`tuicr review get`) | Print a session's comments |
 | `tuicr update [VERSION]` | Update the installed binary |
 

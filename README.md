@@ -233,7 +233,8 @@ tuicr --stdout | pbcopy
 ## Review session CLI
 
 `tuicr review` exposes saved sessions without opening the TUI. It can list
-sessions, add, delete, and clear comments, and print stored comments for
+sessions, add, delete, and clear comments, reply to them (`--reply-to`), and
+print stored comments for
 agent and script
 integrations. See [docs/REVIEW_CLI.md](docs/REVIEW_CLI.md).
 
@@ -331,6 +332,7 @@ A first-session cheatsheet. Press `?` inside tuicr for the full reference.
 | `i` / `e` (file tree) | Filter files in / out by regex; narrows the tree **and** the diff |
 | `I` / `E` (file tree) | Clear the include / exclude filter |
 | `c` / `C` | Add line / file comment |
+| `a` | Reply to the comment at cursor (local-only, never posted to a forge) |
 | `v` / `V` | Visual mode (range comment) |
 | `r` | Toggle file reviewed |
 | `R` | Toggle hunk reviewed |

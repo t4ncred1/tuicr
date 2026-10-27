@@ -9,7 +9,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::App;
 use crate::forge::traits::ForgeKind;
-use crate::model::LineRange;
+use crate::model::{Comment, CommentReply, LineRange};
 use crate::theme::Theme;
 use crate::ui::styles;
 
@@ -161,6 +161,16 @@ pub struct CommentTypePresentation {
     pub color: Color,
 }
 
+/// What the inline comment input box is composing.
+#[derive(Debug, Clone, Copy)]
+pub enum CommentInputKind<'a> {
+    Add,
+    Edit,
+    /// A reply to this comment. Its body and earlier replies are shown
+    /// read-only above the text being typed.
+    Reply(&'a Comment),
+}
+
 /// Format a comment input as multiple lines with a box border for inline editing.
 /// This mimics the normal comment display but shows it's being edited.
 ///
@@ -173,7 +183,7 @@ pub fn format_comment_input_lines(
     buffer: &str,
     cursor_pos: usize,
     line_range: Option<LineRange>,
-    is_editing: bool,
+    kind: CommentInputKind<'_>,
     width: usize,
     vim_mode: Option<(&str, bool)>,
     supports_keyboard_enhancement: bool,
@@ -184,7 +194,11 @@ pub fn format_comment_input_lines(
         .fg(theme.cursor_color)
         .add_modifier(Modifier::UNDERLINED);
 
-    let action = if is_editing { "Edit" } else { "Add" };
+    let action = match kind {
+        CommentInputKind::Add => "Add",
+        CommentInputKind::Edit => "Edit",
+        CommentInputKind::Reply(_) => "Reply",
+    };
     let line_info = match line_range {
         Some(range) if range.is_single() => format!("L{} ", range.start),
         Some(range) => format!("L{}-L{} ", range.start, range.end),
@@ -200,7 +214,7 @@ pub fn format_comment_input_lines(
     let content_area = comment_content_width(width);
 
     let mut result = Vec::new();
-    let mut cursor_line_offset: usize = 1;
+    let mut cursor_line_offset: usize;
     let mut cursor_column: u16 = BORDER_PREFIX_WIDTH as u16;
 
     // Top-left corner becomes `├` when a line range is present — the bar
@@ -241,15 +255,33 @@ pub fn format_comment_input_lines(
     header_spans.push(Span::styled(hint, styles::dim_style(theme)));
     result.push(Line::from(header_spans));
 
+    // A reply shows the thread it answers, read-only, above the input.
+    if let CommentInputKind::Reply(comment) = kind {
+        result.extend(reply_context_lines(
+            theme,
+            comment,
+            content_area,
+            width,
+            border_style,
+        ));
+    }
+    // Rows above the first editable line: the header plus any reply context.
+    let header_rows = result.len();
+    cursor_line_offset = header_rows;
+
     // Content lines with cursor
     if buffer.is_empty() {
+        let placeholder = match kind {
+            CommentInputKind::Reply(_) => "Type your reply...",
+            _ => "Type your comment...",
+        };
         // Show placeholder with cursor at start
         result.push(Line::from(vec![
             Span::styled(BORDER_PREFIX, border_style),
             Span::styled(" ", cursor_style),
-            Span::styled("Type your comment...", styles::dim_style(theme)),
+            Span::styled(placeholder, styles::dim_style(theme)),
         ]));
-        // cursor_line_offset is already 1 (first content line)
+        // cursor_line_offset already points at the first content line
         // cursor_column is already BORDER_PREFIX_WIDTH (cursor at start of content)
     } else {
         let buffer_lines: Vec<&str> = buffer.split('\n').collect();
@@ -292,7 +324,7 @@ pub fn format_comment_input_lines(
                     let cursor_in_line = seg_byte_start + cursor_pos_in_seg;
 
                     // Track cursor position for IME
-                    cursor_line_offset = 1 + total_visual_lines;
+                    cursor_line_offset = header_rows + total_visual_lines;
                     cursor_column = BORDER_PREFIX_WIDTH as u16 + before.width() as u16;
 
                     // before-cursor text, highlighted
@@ -345,6 +377,47 @@ pub fn format_comment_input_lines(
     };
 
     (result, cursor_info)
+}
+
+/// The read-only thread above a reply input: the comment's body, each earlier
+/// reply under its `├── @author` divider, then a `├── reply` divider that
+/// opens the editable area.
+fn reply_context_lines(
+    theme: &Theme,
+    comment: &Comment,
+    content_area: usize,
+    width: usize,
+    border_style: Style,
+) -> Vec<Line<'static>> {
+    let dim = styles::dim_style(theme);
+    let divider = |label: String, label_style: Style| {
+        let fill = width.saturating_sub(8 + label.width());
+        Line::from(vec![
+            Span::styled("    ├── ", border_style),
+            Span::styled(label, label_style),
+            Span::styled("─".repeat(fill), border_style),
+        ])
+    };
+    let body = |text: &str| {
+        let mut lines = markdown_body_lines(theme, text, content_area);
+        for line in &mut lines {
+            for span in &mut line.spans {
+                span.style = span.style.patch(dim);
+            }
+            line.spans
+                .insert(0, Span::styled(BORDER_PREFIX, border_style));
+        }
+        lines
+    };
+
+    let mut lines = body(&comment.content);
+    for reply in &comment.replies {
+        let author_style = Style::default().fg(styles::author_color_for(&reply.author));
+        lines.push(divider(format!("@{} ", reply.author), author_style));
+        lines.extend(body(&reply.content));
+    }
+    lines.push(divider("reply ".to_string(), dim));
+    lines
 }
 
 /// Format an entire remote (read-only) forge review thread as one fused
@@ -529,6 +602,7 @@ pub fn format_comment_lines(
     line_range: Option<LineRange>,
     width: usize,
     author: Option<&str>,
+    replies: &[CommentReply],
 ) -> Vec<Line<'static>> {
     let type_style = styles::comment_type_style(theme, comment_type.color);
     let border_style = match author {
@@ -582,6 +656,27 @@ pub fn format_comment_lines(
             .insert(0, Span::styled(BORDER_PREFIX, border_style));
     }
     result.extend(body_lines);
+
+    // Replies — each opens with a `├─ @author` divider, then its body in the
+    // same box. `App::comment_display_lines` counts these rows too.
+    for reply in replies {
+        let reply_border = Style::default()
+            .fg(styles::author_color_for(&reply.author))
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let badge = format!("@{} ", reply.author);
+        let fill = width.saturating_sub(8 + badge.width());
+        result.push(Line::from(vec![
+            Span::styled("    ├── ", border_style),
+            Span::styled(badge, reply_border),
+            Span::styled("─".repeat(fill), border_style),
+        ]));
+        let mut reply_lines = markdown_body_lines(theme, &reply.content, content_area);
+        for line in &mut reply_lines {
+            line.spans
+                .insert(0, Span::styled(BORDER_PREFIX, border_style));
+        }
+        result.extend(reply_lines);
+    }
 
     // Bottom border — "    ╰" = 5 chars, fill to width
     result.push(Line::from(vec![Span::styled(
@@ -664,12 +759,18 @@ mod tests {
         ];
         // Viewport widths, including degenerate ones narrower than the box chrome.
         for viewport_width in [9usize, 12, 40, 80, 120] {
-            for body in bodies {
-                let comment = crate::model::Comment::new(
+            for (body, with_replies) in bodies.iter().flat_map(|b| [(b, false), (b, true)]) {
+                let mut comment = crate::model::Comment::new(
                     body.to_string(),
                     crate::model::CommentType::from_id("note"),
                     None,
                 );
+                if with_replies {
+                    comment.replies = vec![
+                        crate::model::CommentReply::new(body.to_string(), "Claude"),
+                        crate::model::CommentReply::new("ok\nthanks".to_string(), "user"),
+                    ];
+                }
                 let rendered = format_comment_lines(
                     &theme,
                     CommentTypePresentation {
@@ -682,11 +783,12 @@ mod tests {
                     // cursor-indicator column.
                     viewport_width.saturating_sub(1),
                     None,
+                    &comment.replies,
                 );
                 assert_eq!(
                     App::comment_display_lines(&comment, viewport_width),
                     rendered.len(),
-                    "width={viewport_width} body={body:?}"
+                    "width={viewport_width} body={body:?} replies={with_replies}"
                 );
             }
         }
@@ -807,7 +909,7 @@ mod tests {
             "",
             0,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -836,7 +938,7 @@ mod tests {
             buffer,
             cursor_pos,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -864,7 +966,7 @@ mod tests {
             buffer,
             cursor_pos,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -893,7 +995,7 @@ mod tests {
             buffer,
             cursor_pos,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -921,7 +1023,7 @@ mod tests {
             buffer,
             cursor_pos,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -950,7 +1052,7 @@ mod tests {
             buffer,
             cursor_pos,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -974,7 +1076,7 @@ mod tests {
             "",
             0,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -1000,7 +1102,7 @@ mod tests {
             "",
             0,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             false,
@@ -1046,7 +1148,7 @@ mod tests {
             buffer,
             cursor,
             None,
-            false,
+            CommentInputKind::Add,
             80,
             None,
             true,
@@ -1072,6 +1174,46 @@ mod tests {
     }
 
     #[test]
+    fn reply_input_shows_the_thread_above_the_cursor() {
+        let theme = test_theme();
+        let mut comment = crate::model::Comment::new(
+            "why this?".to_string(),
+            crate::model::CommentType::from_id("note"),
+            None,
+        );
+        comment.replies = vec![crate::model::CommentReply::new(
+            "because".to_string(),
+            "Claude",
+        )];
+
+        let (lines, cursor_info) = format_comment_input_lines(
+            &theme,
+            CommentTypePresentation {
+                label: "NOTE".to_string(),
+                color: Color::Blue,
+            },
+            "ok",
+            2,
+            None,
+            CommentInputKind::Reply(&comment),
+            80,
+            None,
+            false,
+        );
+        let text: Vec<String> = lines.iter().map(|line| line.to_string()).collect();
+
+        // header, comment body, `@Claude` divider, reply body, `reply` divider,
+        // then the typed text and the bottom border.
+        assert_eq!(lines.len(), 7, "{text:#?}");
+        assert!(text[0].contains("Reply"), "{text:#?}");
+        assert!(text[1].contains("why this?"), "{text:#?}");
+        assert!(text[2].contains("@Claude"), "{text:#?}");
+        assert!(text[3].contains("because"), "{text:#?}");
+        assert!(text[4].contains("reply"), "{text:#?}");
+        assert_eq!(cursor_info.line_offset, 5, "cursor sits on the typed text");
+    }
+
+    #[test]
     fn displayed_comment_is_markdown_highlighted_and_preserves_text() {
         let theme = test_theme();
         let content = "# Heading\n**bold** and `code`\n- item";
@@ -1085,6 +1227,7 @@ mod tests {
             None,
             80,
             None,
+            &[],
         );
         // Header + footer wrap the body; reconstruct must round-trip the text.
         assert_eq!(reconstruct(&lines), content);

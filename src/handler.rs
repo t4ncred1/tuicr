@@ -1711,6 +1711,20 @@ fn edit_comment_at_cursor(app: &mut App, cursor_at_end: bool) {
     }
 }
 
+/// Replies are local-only, so unlike editing this works on a comment already
+/// pushed to the forge. Remote threads are not local comments and cannot be
+/// answered here.
+fn reply_to_comment_at_cursor(app: &mut App) {
+    if !app.enter_reply_mode() {
+        if app.cursor_on_remote_thread() {
+            let forge = app.forge_display_name();
+            app.set_message(format!("{forge} comment — read only in tuicr"));
+        } else {
+            app.set_message("No comment at cursor");
+        }
+    }
+}
+
 /// Handle actions when diff panel is focused
 pub fn handle_diff_action(app: &mut App, action: Action) {
     match action {
@@ -1868,6 +1882,7 @@ fn handle_shared_normal_action(app: &mut App, action: Action) {
         Action::EditComment => edit_comment_at_cursor(app, !app.comment_vim_enabled),
         // `A` (vim only) edits with the text cursor at end-of-line.
         Action::EditCommentAtEnd if app.comment_vim_enabled => edit_comment_at_cursor(app, true),
+        Action::ReplyToComment => reply_to_comment_at_cursor(app),
         Action::ExportToClipboard => handle_export(app),
         Action::CopyCommentAtCursor => handle_copy_comment_at_cursor(app),
         Action::SearchNext => {

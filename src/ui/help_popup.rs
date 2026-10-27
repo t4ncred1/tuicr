@@ -578,6 +578,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled(
+                "  a         ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Reply to comment at cursor"),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "  dd        ",
                 Style::default().add_modifier(Modifier::BOLD),
             ),

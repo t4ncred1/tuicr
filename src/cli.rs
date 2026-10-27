@@ -253,6 +253,16 @@ pub enum ReviewCommand {
         #[arg(long, value_enum, default_value_t = LineSideArg::New)]
         side: LineSideArg,
 
+        /// Answer the comment with this id instead of adding a new comment.
+        /// The reply inherits the comment's location and type, so it cannot
+        /// be combined with --target-file, --type, or --input.
+        #[arg(
+            long = "reply-to",
+            value_name = "COMMENT_ID",
+            conflicts_with_all = ["file", "comment_type", "input"],
+        )]
+        reply_to: Option<String>,
+
         /// Author stamped on the new comment. Pass an explicit value when
         /// invoking from an agent (e.g. `--username "Claude Opus 4.7"`) so
         /// human and agent comments are visually distinguished in the TUI.
@@ -1209,10 +1219,49 @@ mod tests {
                 line: Some(42),
                 end_line: None,
                 side: LineSideArg::Old,
+                reply_to: None,
                 username: None,
                 content: Some("Handle the empty case".to_string()),
             })
         );
+    }
+
+    #[test]
+    fn should_parse_review_add_reply_to() {
+        let parsed = parse_for_test(&[
+            "tuicr",
+            "review",
+            "add",
+            "--session",
+            "s",
+            "--reply-to",
+            "abc",
+            "Done",
+        ])
+        .expect("parse should succeed");
+
+        assert!(matches!(
+            parsed.review_command,
+            Some(ReviewCommand::Add { reply_to: Some(ref id), .. }) if id == "abc"
+        ));
+    }
+
+    #[test]
+    fn should_reject_review_add_reply_to_with_a_target() {
+        let result = parse_for_test(&[
+            "tuicr",
+            "review",
+            "add",
+            "--session",
+            "s",
+            "--reply-to",
+            "abc",
+            "--target-file",
+            "src/main.rs",
+            "Done",
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1241,6 +1290,7 @@ mod tests {
                 line: None,
                 end_line: None,
                 side: LineSideArg::New,
+                reply_to: None,
                 username: None,
                 content: None,
             })

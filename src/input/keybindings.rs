@@ -43,6 +43,7 @@ pub enum Action {
     EditComment,
     /// Edit the comment at cursor with the text cursor at end (vim `A`).
     EditCommentAtEnd,
+    ReplyToComment,
     PendingDCommand,
     EditFile,
     SearchNext,
@@ -278,6 +279,7 @@ fn map_normal_mode_with_q_quits(key: KeyEvent, leader_key: char, q_quits: bool) 
         (KeyCode::Char('C'), _) => Action::AddFileComment,
         (KeyCode::Char('i'), KeyModifiers::NONE) => Action::EditComment,
         (KeyCode::Char('A'), _) => Action::EditCommentAtEnd,
+        (KeyCode::Char('a'), KeyModifiers::NONE) => Action::ReplyToComment,
         (KeyCode::Char('d'), KeyModifiers::NONE) => Action::PendingDCommand,
         (KeyCode::Char('v') | KeyCode::Char('V'), _) => Action::EnterVisualMode,
         (KeyCode::Char('y'), KeyModifiers::NONE) => Action::ExportToClipboard,

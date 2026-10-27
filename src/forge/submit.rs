@@ -1179,6 +1179,24 @@ mod tests {
     }
 
     #[test]
+    fn should_never_post_local_replies_to_the_forge() {
+        let mut comment = note("question");
+        comment.replies = vec![crate::model::CommentReply::new(
+            "local answer".to_string(),
+            "Claude",
+        )];
+        let config = default_config();
+        let comment_types = test_comment_types();
+        let ctx = ctx_of(&config, &comment_types);
+
+        let review_body = build_review_body(std::slice::from_ref(&comment), &[], ctx);
+        let inline_body = build_inline_body(&comment, false, ctx);
+
+        assert_eq!(review_body, "[NOTE] question");
+        assert_eq!(inline_body, "[NOTE] question");
+    }
+
+    #[test]
     fn should_render_unplaced_comments_section() {
         let item = MovedToSummaryItem {
             comment: Comment::new("kaboom".to_string(), CommentType::from_id("issue"), None),

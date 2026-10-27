@@ -18,7 +18,9 @@ use crate::model::{
     LineRange, LineSide, ReviewSession, SessionDiffSource,
 };
 use crate::persistence::load_latest_session_for_context;
-use crate::review_store::{AddCommentRequest, CommentTarget, add_comment_to_session};
+use crate::review_store::{
+    AddCommentRequest, CommentTarget, add_comment_to_session, add_reply_to_session,
+};
 use crate::syntax::SyntaxHighlighter;
 use crate::theme::Theme;
 use crate::update::UpdateInfo;
@@ -1234,6 +1236,9 @@ pub struct App {
     pub comment_is_file_level: bool,
     pub comment_line: Option<(u32, LineSide)>,
     pub editing_comment_id: Option<String>,
+    /// The comment input is answering `editing_comment_id` rather than
+    /// editing it: saving appends a reply instead of replacing the content.
+    pub replying_to_comment: bool,
 
     pub visual_selection: Option<VisualSelection>,
     /// True once the active mouse drag has actually moved off the press cell.
