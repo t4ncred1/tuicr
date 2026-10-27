@@ -61,13 +61,23 @@ pub fn get_staged_diff(
     })
 }
 
+/// The repository's index as it is on disk now. `Repository::index` hands
+/// back libgit2's cached copy, which a long-running tuicr would otherwise keep
+/// using after another process stages or commits; libgit2 refreshes it only
+/// for diffs that load the index themselves, not ones passed an index.
+fn current_index(repo: &Repository) -> Result<git2::Index> {
+    let mut index = repo.index()?;
+    index.read(false)?;
+    Ok(index)
+}
+
 fn get_staged_diff_once(
     repo: &Repository,
     comparison: WhitespaceComparison,
     highlighter: &SyntaxHighlighter,
 ) -> Result<Vec<DiffFile>> {
     let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    let index = repo.index()?;
+    let index = current_index(repo)?;
     let mut opts = diff_options(comparison);
 
     let diff = repo.diff_tree_to_index(head.as_ref(), Some(&index), Some(&mut opts))?;
@@ -93,12 +103,12 @@ pub fn list_changed_paths(repo: &Repository, kind: ChangeKind) -> Result<Vec<Pat
     let diff = match kind {
         ChangeKind::Staged => {
             let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-            let index = repo.index()?;
+            let index = current_index(repo)?;
             let mut opts = diff_options(WhitespaceComparison::Normal);
             repo.diff_tree_to_index(head.as_ref(), Some(&index), Some(&mut opts))?
         }
         ChangeKind::Unstaged => {
-            let index = repo.index()?;
+            let index = current_index(repo)?;
             let mut opts = diff_options(WhitespaceComparison::Normal);
             opts.include_untracked(true);
             // `show_untracked_content(false)` keeps libgit2 from reading each
@@ -139,7 +149,7 @@ fn get_unstaged_diff_once(
     comparison: WhitespaceComparison,
     highlighter: &SyntaxHighlighter,
 ) -> Result<Vec<DiffFile>> {
-    let index = repo.index()?;
+    let index = current_index(repo)?;
     let mut opts = diff_options(comparison);
     opts.include_untracked(true);
     opts.show_untracked_content(true);
@@ -591,6 +601,32 @@ mod tests {
             get_unstaged_diff(&repo, &DiffWhitespaceMode::Normal, &highlighter),
             Err(TuicrError::NoChanges)
         ));
+    }
+
+    #[test]
+    fn should_see_staging_done_through_another_repository_handle() {
+        // given a handle that has already read the index, as a long-running
+        // tuicr has
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let repo = Repository::init(temp_dir.path()).expect("failed to init repo");
+        create_initial_commit(&repo, "file.txt", "base\n");
+        let highlighter = SyntaxHighlighter::default();
+        assert!(matches!(
+            get_staged_diff(&repo, &DiffWhitespaceMode::Normal, &highlighter),
+            Err(TuicrError::NoChanges)
+        ));
+
+        // when another process stages a change
+        fs::write(temp_dir.path().join("file.txt"), "staged\n").expect("write file");
+        let other = Repository::open(temp_dir.path()).expect("reopen repo");
+        let mut index = other.index().expect("open index");
+        index.add_path(Path::new("file.txt")).expect("stage file");
+        index.write().expect("write index");
+
+        // then the original handle reports it
+        let staged = get_staged_diff(&repo, &DiffWhitespaceMode::Normal, &highlighter)
+            .expect("staged diff failed");
+        assert_eq!(staged.len(), 1);
     }
 
     #[test]
