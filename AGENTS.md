@@ -129,8 +129,8 @@ src/
 Repository-managed agent integrations:
 
 - `skills/tuicr/` - Shared agent skill bundle for coding agents, for example Claude Code, Codex, and similar tools; launches tuicr in a cmux, tmux, Zellij, or Herdr split pane
-- `skills/tuicr/tuicr-claude-hook.sh` - Claude Code `PostToolUse` hook that delivers new comments from the repo's active local session as `additionalContext`, so a live review reaches the agent mid-task
-- `skills/tuicr/tuicr-herdr-tab.sh` - Herdr custom-keybinding target that opens `tuicr -w` for the active pane's repo in a new tab of the same workspace, or focuses the existing one
+- `skills/tuicr/tuicr-watch.sh` - long-running watcher an agent runs as a background monitor (Claude Code's `Monitor` tool); prints one line per open thread (last entry not the agent's) in the repo's active local session, so feedback wakes an idle agent. Reported keys persist in a state file so a re-armed monitor only sees new activity
+- `skills/tuicr/tuicr-herdr-tab.sh` - opens tuicr for a directory (an agent passes its current one, which follows it across worktrees; a Herdr keybinding falls back to the active pane's) in a `tuicr <repo>` tab, or focuses that repo's existing tab. Uses `-w` on a dirty tree and the commit selector on a clean one. Returns without waiting
 
 ### Key Types
 

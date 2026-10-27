@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
-# Opens tuicr in a new tab of the active Herdr workspace, or focuses the
-# workspace's existing tuicr tab. Meant for a Herdr custom keybinding:
+# Opens tuicr in a new tab of a Herdr workspace, or focuses that workspace's
+# existing tuicr tab for the same repository. Returns as soon as tuicr is
+# running, so the review stays open beside a working agent (unlike
+# tuicr-wrapper-herdr.sh, which waits for tuicr to exit).
+#
+# Usage: tuicr-herdr-tab.sh [directory] [-- tuicr-args...]
+#
+# An agent passes its current working directory. That matters after it moves
+# to another worktree: its process keeps the launch directory as cwd, so
+# anything reading the pane's cwd would open the review in the wrong checkout.
+#
+# Also works as a Herdr custom keybinding target, where it reviews the active
+# pane's directory:
 #
 #   [[keys.command]]
 #   key = "prefix+t"
@@ -8,43 +19,79 @@
 #   command = "/path/to/tuicr-herdr-tab.sh"
 #   description = "tuicr review tab"
 #
-# Unlike tuicr-wrapper-herdr.sh this does not wait for tuicr to exit, so the
-# review stays open beside a working agent.
+# Without tuicr args it passes `-w` when the tree has uncommitted changes and
+# nothing otherwise, which opens the commit selector: `tuicr -w` exits on a
+# clean tree and would close the tab at once.
 #
 # Environment variables:
-#   TUICR_ARGS  arguments for tuicr (default: -w)
-#   TUICR_TAB_LABEL  tab label used to find an existing review tab (default: tuicr)
-#   JQ_BIN      jq executable (default: jq)
+#   TUICR_TAB_LABEL  tab label prefix; the repository name is appended, and
+#                    the full label finds an existing review tab (default: tuicr)
+#   JQ_BIN           jq executable (default: jq)
 set -e -u -o pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_tuicr-common.sh"
 
 HERDR_BIN="${HERDR_BIN_PATH:-herdr}"
 JQ_BIN="${JQ_BIN:-jq}"
-TUICR_ARGS="${TUICR_ARGS:--w}"
 TAB_LABEL="${TUICR_TAB_LABEL:-tuicr}"
 
-# Set by Herdr for custom commands; absent means we were not launched by a
-# keybinding.
-workspace_id="${HERDR_ACTIVE_WORKSPACE_ID:?not launched from a Herdr keybinding}"
-pane_cwd="${HERDR_ACTIVE_PANE_CWD:-$PWD}"
+tuicr_parse_args "$@"
+if [[ $# -eq 0 && -n "${HERDR_ACTIVE_PANE_CWD:-}" ]]; then
+  # Launched from a keybinding: review what the active pane is looking at.
+  TUICR_TARGET_DIR="$HERDR_ACTIVE_PANE_CWD"
+fi
+[[ -d "$TUICR_TARGET_DIR" ]] || {
+  echo "Directory not found: $TUICR_TARGET_DIR" >&2
+  exit 1
+}
 
+# tuicr keys sessions on the repository root, and the directory is often a
+# subdirectory of it.
+repo_root=$(git -C "$TUICR_TARGET_DIR" rev-parse --show-toplevel 2>/dev/null) ||
+  repo_root=$(cd "$TUICR_TARGET_DIR" && jj root 2>/dev/null) ||
+  repo_root=$(cd "$TUICR_TARGET_DIR" && pwd)
+
+# A keybinding names the active workspace. A pane's own HERDR_WORKSPACE_ID can
+# go stale when Herdr renumbers workspaces, so it is used only while it still
+# exists; otherwise the focused workspace, where the user just asked for this.
+workspaces=$("$HERDR_BIN" workspace list)
+workspace_id="${HERDR_ACTIVE_WORKSPACE_ID:-}"
+if [[ -z "$workspace_id" && -n "${HERDR_WORKSPACE_ID:-}" ]]; then
+  workspace_id=$(printf '%s' "$workspaces" | "$JQ_BIN" -r --arg ws "$HERDR_WORKSPACE_ID" \
+    '.result.workspaces[] | select(.workspace_id == $ws) | .workspace_id')
+fi
+if [[ -z "$workspace_id" ]]; then
+  workspace_id=$(printf '%s' "$workspaces" |
+    "$JQ_BIN" -er '[.result.workspaces[] | select(.focused)][0].workspace_id')
+fi
+
+# One tab per repository, so a review of another worktree gets its own tab
+# instead of focusing the old one.
+tab_label="$TAB_LABEL $(basename "$repo_root")"
 existing_tab=$("$HERDR_BIN" tab list |
-  "$JQ_BIN" -r --arg ws "$workspace_id" --arg label "$TAB_LABEL" \
+  "$JQ_BIN" -r --arg ws "$workspace_id" --arg label "$tab_label" \
     '[.result.tabs[] | select(.workspace_id == $ws and .label == $label)][0].tab_id // empty')
 if [[ -n "$existing_tab" ]]; then
   "$HERDR_BIN" tab focus "$existing_tab" >/dev/null
+  echo "Focused existing tab $existing_tab ($tab_label)"
   exit 0
 fi
 
-# tuicr keys sessions on the repository root, and an agent pane often sits
-# in a subdirectory.
-repo_root=$(git -C "$pane_cwd" rev-parse --show-toplevel 2>/dev/null) ||
-  repo_root=$(cd "$pane_cwd" && jj root 2>/dev/null) ||
-  repo_root="$pane_cwd"
+if ((${#TUICR_PASSTHROUGH_ARGS[@]} > 0)); then
+  tuicr_args=("${TUICR_PASSTHROUGH_ARGS[@]}")
+elif [[ -n "$(git -C "$repo_root" status --porcelain 2>/dev/null ||
+  (cd "$repo_root" && jj diff --summary 2>/dev/null))" ]]; then
+  tuicr_args=(-w)
+else
+  tuicr_args=()
+fi
 
 pane_id=$("$HERDR_BIN" tab create --workspace "$workspace_id" --cwd "$repo_root" \
-  --label "$TAB_LABEL" --focus |
+  --label "$tab_label" --focus |
   "$JQ_BIN" -er '.result.root_pane.pane_id')
 
 # `exec` makes quitting tuicr close the tab. The pane's interactive shell
 # parses this line, and `exec cmd args` reads the same in bash, zsh and fish.
-"$HERDR_BIN" pane run "$pane_id" "exec tuicr $TUICR_ARGS" >/dev/null
+"$HERDR_BIN" pane run "$pane_id" \
+  "exec tuicr${tuicr_args[*]+$(tuicr_quote_args "${tuicr_args[@]}")}" >/dev/null
+echo "Opened tuicr in pane $pane_id ($tab_label): $repo_root"

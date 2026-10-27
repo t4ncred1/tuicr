@@ -1,6 +1,6 @@
 ---
 name: tuicr
-description: Use tuicr's review CLI to read and add comments in active TUI review sessions, and launch tuicr in cmux, tmux, Zellij, or Herdr when a user needs an interactive review pane.
+description: Use tuicr's review CLI to read, add, and reply to comments in active TUI review sessions, watch a live review so new feedback arrives while you work or sit idle, and launch tuicr in cmux, tmux, Zellij, or Herdr when a user needs an interactive review pane.
 ---
 
 # tuicr Review Workflow
@@ -244,6 +244,77 @@ never renders — invisible to the user, successful-looking to you. Re-read
 (`new` for added or unchanged, `old` for removed). Check `author` to distinguish
 your comments from the user's, and keep the returned `id`s to identify the exact
 comments in later reads.
+
+## Reply To The User's Comments
+
+When you act on a user comment, answer it in its thread rather than adding a
+new comment beside it:
+
+```bash
+tuicr review add --repo /path/to/repo --session <slug> \
+  --username "Claude" \
+  --reply-to <comment-id> \
+  "Done: the empty case now returns early."
+```
+
+Replies show inside the comment's box in the TUI, carry no location or type of
+their own, and are never posted to a forge. In `tuicr review comments` each
+comment lists its thread under `replies`, oldest first. A thread whose last
+entry is yours is answered; one whose last entry is the user's (the comment
+itself, or a reply to you) is still waiting.
+
+## Watch A Live Review
+
+A live review keeps tuicr open beside you while you work: the user comments,
+you act on each comment and answer it in its thread.
+
+To open tuicr for it under Herdr (`$HERDR_ENV` is `1`), run the tab launcher
+with your **current working directory**, not the repository you started in —
+after you move to another worktree, that is the checkout holding your changes:
+
+```bash
+<skill-directory>/tuicr-herdr-tab.sh "$PWD"
+```
+
+It returns immediately, opens a `tuicr <repo>` tab in the user's workspace (or
+focuses the one already open for that repository), and picks the scope itself:
+`-w` when the tree has uncommitted changes, the commit selector otherwise.
+Pass `-- <tuicr-args>` to choose the scope instead. If you move to another
+worktree mid-review, run it again for the new directory. Outside Herdr, use the
+launchers under "Start A Session".
+
+Then run `tuicr-watch.sh` (in this skill directory) as a long-running
+background monitor whose output lines reach you as notifications — in Claude
+Code, the `Monitor` tool. Use the maximum timeout and start it with `--reset`
+when you begin watching, so every thread already open is reported once:
+
+```bash
+<skill-directory>/tuicr-watch.sh --reset "$PWD"
+```
+
+When you move to another worktree, stop the watcher and start it again with
+`--reset` for the new directory.
+
+It polls the repo's active local session and prints one line per event:
+
+- `tuicr: watching session <slug>` — a session is open; use this slug.
+- `tuicr: open thread <id> <location> - @<author>: <text>` — a thread now
+  waits on you: a new comment, an edited one, or a reply to your answer. The
+  text is cut at 300 characters; read the full thread with
+  `tuicr review comments --session <slug>`.
+- `tuicr: error: <message>` — the watcher has stopped; fix the cause and
+  start it again.
+
+Handle each open thread like a user comment (ISSUE first), then answer it with
+`--reply-to <id>` as above. Your reply closes the thread, so it is not
+reported again until the user responds. Pass `--username` matching
+`TUICR_WATCH_AGENT` (default `Claude`), or your replies will not count as
+answers.
+
+When the monitor expires, start it again **without** `--reset`: the watcher
+remembers what it reported, so only new activity comes through. It stays
+silent while no tuicr session is open, and picks a session up as soon as one
+starts. Stop it when the user is done reviewing.
 
 ## Legacy Export Output
 
