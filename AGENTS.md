@@ -129,6 +129,8 @@ src/
 Repository-managed agent integrations:
 
 - `skills/tuicr/` - Shared agent skill bundle for coding agents, for example Claude Code, Codex, and similar tools; launches tuicr in a cmux, tmux, Zellij, or Herdr split pane
+- `skills/tuicr/tuicr-claude-hook.sh` - Claude Code `PostToolUse` hook that delivers new comments from the repo's active local session as `additionalContext`, so a live review reaches the agent mid-task
+- `skills/tuicr/tuicr-herdr-tab.sh` - Herdr custom-keybinding target that opens `tuicr -w` for the active pane's repo in a new tab of the same workspace, or focuses the existing one
 
 ### Key Types
 
