@@ -589,6 +589,11 @@ impl App {
     /// review back out while the selector still shows the subset. Anything not
     /// narrowed gets `diff_source` back untouched.
     ///
+    /// Working-tree reviews count too: under `-w` the diff-watch tick fills
+    /// the pane with recent history, so a selection there can pull commits in
+    /// alongside the "Unstaged changes" row. Only PR reviews are exempt; they
+    /// reload through `reload_pull_request`.
+    ///
     /// It returns a value instead of fetching so the caller can resolve it on
     /// the main thread and hand the result to a worker, rather than sharing
     /// `App` across threads.
@@ -597,10 +602,7 @@ impl App {
         review_commits: &[CommitInfo],
         commit_selection_range: Option<(usize, usize)>,
     ) -> DiffSource {
-        if !matches!(
-            diff_source,
-            DiffSource::CommitRange(_) | DiffSource::StagedUnstagedAndCommits(_)
-        ) {
+        if matches!(diff_source, DiffSource::PullRequest(_)) {
             return diff_source.clone();
         }
         if !Self::is_strict_commit_selection(commit_selection_range, review_commits.len()) {
