@@ -19,9 +19,8 @@
 #   command = "/path/to/tuicr-herdr-tab.sh"
 #   description = "tuicr review tab"
 #
-# Without tuicr args it passes `-w` when the tree has uncommitted changes and
-# nothing otherwise, which opens the commit selector: `tuicr -w` exits on a
-# clean tree and would close the tab at once.
+# Without tuicr args it reviews with `--branch`: the branch's commits since it
+# forked plus uncommitted changes, in a session that follows new commits.
 #
 # Environment variables:
 #   TUICR_TAB_LABEL  tab label prefix; the repository name is appended, and
@@ -79,19 +78,18 @@ fi
 
 if ((${#TUICR_PASSTHROUGH_ARGS[@]} > 0)); then
   tuicr_args=("${TUICR_PASSTHROUGH_ARGS[@]}")
-elif [[ -n "$(git -C "$repo_root" status --porcelain 2>/dev/null ||
-  (cd "$repo_root" && jj diff --summary 2>/dev/null))" ]]; then
-  tuicr_args=(-w)
 else
-  tuicr_args=()
+  tuicr_args=(--branch)
 fi
 
 pane_id=$("$HERDR_BIN" tab create --workspace "$workspace_id" --cwd "$repo_root" \
   --label "$tab_label" --focus |
   "$JQ_BIN" -er '.result.root_pane.pane_id')
 
-# `exec` makes quitting tuicr close the tab. The pane's interactive shell
-# parses this line, and `exec cmd args` reads the same in bash, zsh and fish.
+# `exec` makes quitting tuicr close the tab; when tuicr fails instead (say,
+# nothing to review yet), the tab waits for Enter so its error stays readable.
+# The pane's interactive shell parses this line, and `exec bash -c '...'`
+# reads the same in bash, zsh and fish.
 "$HERDR_BIN" pane run "$pane_id" \
-  "exec tuicr${tuicr_args[*]+$(tuicr_quote_args "${tuicr_args[@]}")}" >/dev/null
+  "exec bash -c 'tuicr \"\$@\" || read -rp \"tuicr exited; press Enter to close\" _' tuicr$(tuicr_quote_args "${tuicr_args[@]}")" >/dev/null
 echo "Opened tuicr in pane $pane_id ($tab_label): $repo_root"

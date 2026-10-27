@@ -1240,6 +1240,9 @@ pub struct App {
     /// editing it: saving appends a reply instead of replacing the content.
     pub replying_to_comment: bool,
 
+    /// Set for a `--branch` review: reloads resolve the branch's commits again.
+    pub branch_review: Option<BranchReview>,
+
     pub visual_selection: Option<VisualSelection>,
     /// True once the active mouse drag has actually moved off the press cell.
     /// Lets Up distinguish click from drag-back-to-anchor.
@@ -1884,6 +1887,9 @@ impl Default for VcsOpenOptions {
 pub struct AppStartupOptions<'a> {
     pub revisions: Option<&'a str>,
     pub working_tree: bool,
+    /// `--branch`: `Some(None)` finds the fork point, `Some(Some(base))`
+    /// forks from `base`.
+    pub branch: Option<Option<&'a str>>,
     pub path_filter: Option<&'a str>,
     pub file_path: Option<&'a str>,
     /// Whole-repo annotation mode (`--all-files`). Mutually exclusive with
@@ -1920,6 +1926,7 @@ impl AppStartupOptions<'_> {
 }
 
 mod annotations;
+mod branch;
 mod coloring;
 mod comment_vim;
 mod comments;
@@ -1940,6 +1947,8 @@ mod submit;
 mod theme_picker;
 mod tree;
 mod visual;
+
+pub use branch::BranchReview;
 
 #[cfg(test)]
 mod tests;

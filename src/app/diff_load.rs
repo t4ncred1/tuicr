@@ -833,6 +833,7 @@ impl App {
     /// Reloads diff files from disk. Returns `(file_count, invalidated_count)` where
     /// `invalidated_count` is the number of previously reviewed files whose content changed.
     pub fn reload_diff_files(&mut self) -> Result<(usize, usize)> {
+        self.refresh_branch_commits()?;
         let diff_files = self.fetch_diff_files()?;
         let full_reload = !Self::is_strict_commit_selection(
             self.commit_selection_range,
@@ -1363,7 +1364,7 @@ impl App {
     /// `reanchored_commit_selection`. It arrives as a parameter rather than
     /// being recomputed here, so the answer and the rows it indexes into come
     /// from the same comparison rather than two readings of the list.
-    fn install_refreshed_commit_pane(
+    pub(in crate::app) fn install_refreshed_commit_pane(
         &mut self,
         rows: Vec<CommitInfo>,
         range: Option<(usize, usize)>,
@@ -1892,6 +1893,7 @@ mod tests {
         let options = AppStartupOptions {
             revisions: None,
             working_tree: false,
+            branch: None,
             path_filter: None,
             file_path: None,
             all_files: false,

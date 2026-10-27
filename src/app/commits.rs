@@ -510,6 +510,10 @@ impl App {
                 self.set_message("Restart tuicr with --file <path> to open this review.");
                 return Ok(());
             }
+            SessionDiffSource::Branch => {
+                self.set_message("Restart tuicr with --branch to open this review.");
+                return Ok(());
+            }
             // A PR review is fetched, not read from the checkout. The session
             // records the forge repository and number, so resume can reuse the
             // Pull Requests tab's open path instead of sending the user there.

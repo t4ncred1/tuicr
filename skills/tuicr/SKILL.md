@@ -82,8 +82,10 @@ When the user needs an interactive tuicr pane and no active session exists:
 | `$HERDR_ENV` is `1` | Run `tuicr-wrapper-herdr.sh /path/to/repo -- <scope>` |
 | None is set | Tell the user you are waiting for them to start `tuicr` in the repo, then attach with `tuicr review list` after they say it is ready |
 
-`<scope>` is `-w` for uncommitted working-tree changes or `-r <revset>` for a
-commit range — always pass one explicitly so the user is never left to pick
+`<scope>` is `--branch` for everything on the current branch (its commits
+since it forked plus uncommitted changes, followed as new commits land), `-w`
+for uncommitted working-tree changes only, or `-r <revset>` for a commit
+range — always pass one explicitly so the user is never left to pick
 staged/unstaged/commit-range manually in the TUI.
 
 If more than one multiplexer marker is set, prefer the innermost multiplexer if
@@ -136,6 +138,7 @@ segment says which:
 | `commits/<base>..<head>` | `git diff <base>~1..<head>` |
 | `pr/<n>` | `gh pr diff <n>` |
 | `pristine` | none; every tracked file shown in full |
+| `branch` | `git diff <fork-point>`, where the fork point is the `git merge-base HEAD <ref>` nearest to HEAD among `main`/`master` (local and remote) |
 
 Range endpoints are inclusive and printed oldest-first, so `<base>` without
 `~1` drops the first commit. Check the file count against the listing row's
@@ -277,9 +280,14 @@ after you move to another worktree, that is the checkout holding your changes:
 ```
 
 It returns immediately, opens a `tuicr <repo>` tab in the user's workspace (or
-focuses the one already open for that repository), and picks the scope itself:
-`-w` when the tree has uncommitted changes, the commit selector otherwise.
-Pass `-- <tuicr-args>` to choose the scope instead. If you move to another
+focuses the one already open for that repository), and reviews with
+`--branch`: every commit on your branch since it forked plus uncommitted
+changes, in one session tied to the branch. Commits you make later join the
+review when the user reloads, and their comments stay put, so commit freely.
+Pass `-- --branch=<base>` when the branch forked from something other than
+`main` or `master`, or `-- <tuicr-args>` for another scope. tuicr refuses to
+start while the branch has nothing to review, so open it once you have
+changes. If you move to another
 worktree mid-review, run it again for the new directory. Outside Herdr, use the
 launchers under "Start A Session".
 

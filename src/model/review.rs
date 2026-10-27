@@ -103,6 +103,10 @@ pub enum SessionDiffSource {
     /// `base_commit` for these sessions starts with `"pristine:"` so the
     /// reload path can match by prefix instead of exact HEAD.
     Pristine,
+    /// `--branch` review: the branch's commits since it forked plus the
+    /// working tree. Keyed by branch alone, so the session survives new
+    /// commits; the commit list is resolved again on every reload.
+    Branch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -46,6 +46,7 @@ take the last one given and boolean flags stay on once set, so
 | `--appearance` | | `light`, `dark`, `system` | Appearance mode, used when no explicit theme is set |
 | `--path` | `-p` | `PATH` | Filter the diff to a file or directory |
 | `--working-tree` | `-w` | | Include uncommitted changes and skip the target selector |
+| `--branch` | `-b` | `BASE` (optional, as `--branch=BASE`) | Review the current branch: its commits since it forked, plus uncommitted changes. Not with `-r` or `-w` |
 | `--file` | | `PATH` | Open a file or directory for annotation with no VCS required |
 | `--line` | | `N` | Start with the cursor on line `N` (new side). Requires `--file` or `--path`; not with `pr` |
 | `--all-files` | `-A` | | Review every tracked file in the current repo |
@@ -98,6 +99,26 @@ commit range instead:
 tuicr -p src/cli.rs                 # uncommitted changes to one file
 tuicr -r main..HEAD -p src/cli.rs   # that file's changes across a range
 ```
+
+### Branch review
+
+`--branch` reviews everything on the current branch: every commit since it
+forked, plus staged and unstaged changes, in one session named after the branch
+(`<repo>@<branch>/branch`). `:e` resolves the branch's commits again, so
+commits made while tuicr is open join the review, and comments survive them
+because the session does not change. A rebase is followed too.
+
+The fork point is the merge base with `main` or `master`, local or on any
+remote, whichever is nearest to HEAD. Name the base yourself when the branch
+forked from something else:
+
+```bash
+tuicr --branch               # fork point found from main/master
+tuicr --branch=release-7.4   # forked from release-7.4
+```
+
+It needs Git and a checked-out branch (not a detached HEAD), and exits when the
+branch has no commits of its own and nothing uncommitted.
 
 ### Starting at a line
 

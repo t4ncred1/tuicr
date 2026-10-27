@@ -25,6 +25,7 @@ fn file_options(path: &str) -> AppStartupOptions<'_> {
     AppStartupOptions {
         revisions: None,
         working_tree: false,
+        branch: None,
         path_filter: None,
         file_path: Some(path),
         all_files: false,

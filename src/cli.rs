@@ -22,6 +22,9 @@ pub struct CliArgs {
     pub revisions: Option<String>,
     /// Skip commit selector and review uncommitted changes directly.
     pub working_tree: bool,
+    /// Branch review: `Some(None)` finds the fork point, `Some(Some(base))`
+    /// forks from `base`.
+    pub branch: Option<Option<String>>,
     /// Filter diff to a specific file or directory path.
     pub path_filter: Option<String>,
     /// Open a single file or directory for annotation (no VCS required).
@@ -100,6 +103,20 @@ struct TuiOptions {
         conflicts_with_all = ["file_path", "all_files"],
     )]
     working_tree: bool,
+
+    /// Review the current branch: its commits since it forked, plus
+    /// uncommitted changes. The session follows the branch, so `:e` picks up
+    /// new commits. `--branch=<BASE>` names the branch it forked from.
+    #[arg(
+        short = 'b',
+        long = "branch",
+        value_name = "BASE",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "",
+        conflicts_with_all = ["revisions", "working_tree", "file_path", "all_files"],
+    )]
+    branch: Option<String>,
 
     /// Open a file or directory for annotation (no VCS required).
     #[arg(
@@ -386,6 +403,9 @@ impl From<Cli> for CliArgs {
             no_update_check: options.no_update_check,
             revisions: options.revisions,
             working_tree: options.working_tree,
+            branch: options
+                .branch
+                .map(|base| Some(base).filter(|base| !base.is_empty())),
             path_filter: options.path_filter,
             file_path: options.file_path,
             all_files: options.all_files,
@@ -408,6 +428,7 @@ impl TuiOptions {
             || self.no_update_check
             || self.revisions.is_some()
             || self.working_tree
+            || self.branch.is_some()
             || self.path_filter.is_some()
             || self.file_path.is_some()
             || self.start_line.is_some()
@@ -424,6 +445,7 @@ impl TuiOptions {
             no_update_check: self.no_update_check || later.no_update_check,
             revisions: later.revisions.or(self.revisions),
             working_tree: self.working_tree || later.working_tree,
+            branch: later.branch.or(self.branch),
             path_filter: later.path_filter.or(self.path_filter),
             file_path: later.file_path.or(self.file_path),
             start_line: later.start_line.or(self.start_line),
@@ -719,6 +741,26 @@ mod tests {
             parse_for_test(&["tuicr", "-w", "-r", "HEAD~3..HEAD"]).expect("parse should succeed");
         assert!(parsed.working_tree);
         assert_eq!(parsed.revisions, Some("HEAD~3..HEAD".to_string()));
+    }
+
+    #[test]
+    fn should_parse_branch_without_a_base() {
+        let parsed = parse_for_test(&["tuicr", "--branch"]).expect("parse should succeed");
+        assert_eq!(parsed.branch, Some(None));
+        let parsed = parse_for_test(&["tuicr", "-b"]).expect("parse should succeed");
+        assert_eq!(parsed.branch, Some(None));
+    }
+
+    #[test]
+    fn should_parse_branch_with_a_base() {
+        let parsed = parse_for_test(&["tuicr", "--branch=main"]).expect("parse should succeed");
+        assert_eq!(parsed.branch, Some(Some("main".to_string())));
+    }
+
+    #[test]
+    fn should_reject_branch_with_working_tree_or_revisions() {
+        assert!(parse_for_test(&["tuicr", "--branch", "-w"]).is_err());
+        assert!(parse_for_test(&["tuicr", "--branch", "-r", "HEAD~1..HEAD"]).is_err());
     }
 
     #[test]
