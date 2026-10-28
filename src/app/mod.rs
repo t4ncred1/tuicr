@@ -1509,6 +1509,9 @@ pub struct CommentTypeDefinition {
     pub label: String,
     pub definition: Option<String>,
     pub color: Option<Color>,
+    /// Meant for the forge: offered only in PR reviews, and once any type
+    /// sets it, the only types `:submit` posts.
+    pub forge: bool,
 }
 
 #[derive(Default)]

@@ -70,6 +70,9 @@ pub struct CommentTypeConfig {
     pub label: Option<String>,
     pub definition: Option<String>,
     pub color: Option<String>,
+    /// Comments of this type are meant for the forge: offered only in PR
+    /// reviews, and once any type sets it, the only ones `:submit` posts.
+    pub forge: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -824,7 +827,7 @@ fn parse_comment_types(
         };
 
         for key in entry.keys() {
-            if key != "id" && key != "label" && key != "definition" && key != "color" {
+            if !["id", "label", "definition", "color", "forge"].contains(&key.as_str()) {
                 warnings.push(format!(
                     "Warning: Unknown key 'comment_types[{index}].{key}', ignoring"
                 ));
@@ -884,12 +887,23 @@ fn parse_comment_types(
             },
         };
 
+        let forge = match entry.get("forge") {
+            None => false,
+            Some(raw) => raw.as_bool().unwrap_or_else(|| {
+                warnings.push(format!(
+                    "Warning: Config key 'comment_types[{index}].forge' must be true or false; ignoring value"
+                ));
+                false
+            }),
+        };
+
         seen_ids.insert(id.clone());
         parsed.push(CommentTypeConfig {
             id,
             label,
             definition,
             color,
+            forge,
         });
     }
 
@@ -2283,6 +2297,28 @@ comment_type_prefix = "yes"
         assert_eq!(comment_types[0].id, "note");
         assert_eq!(comment_types[0].color, None);
         assert_eq!(outcome.warnings.len(), 1);
+    }
+
+    #[test]
+    fn should_parse_comment_type_forge_flag() {
+        let outcome = parse_config(
+            r#"comment_types = [
+  { id = "claude" },
+  { id = "pr", forge = true },
+  { id = "odd", forge = "yes" }
+]"#,
+        );
+        let comment_types = outcome
+            .config
+            .as_ref()
+            .and_then(|cfg| cfg.comment_types.as_ref())
+            .expect("comment types should be set");
+
+        assert!(!comment_types[0].forge);
+        assert!(comment_types[1].forge);
+        assert!(!comment_types[2].forge);
+        assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
+        assert!(outcome.warnings[0].contains("forge"));
     }
 
     // export

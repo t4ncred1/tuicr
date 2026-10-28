@@ -217,15 +217,11 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
     frame.render_widget(paragraph, inner);
 }
 
-/// The `[TYPE]` tag here must match what submit actually sends, so it resolves
-/// the configured `label` rather than the raw id.
+/// The `[TYPE]` tag here must match what submit actually sends, so it asks
+/// the same `SubmitContext::posted_tag` the payload builders use.
 fn describe_row(app: &App, item: &UnmappableItem) -> String {
-    let label = app.comment_type_label(&item.comment.comment_type);
-    let type_tag = if label.is_empty() {
-        String::new()
-    } else {
-        format!("[{label}] ")
-    };
+    let type_tag = crate::forge::submit::SubmitContext::new(&app.forge_config, &app.comment_types)
+        .posted_tag(&item.comment.comment_type);
     let path = item.file.display();
     let preview: String = item.comment.content.chars().take(40).collect();
     let ellipsis = if item.comment.content.chars().count() > 40 {
@@ -238,7 +234,7 @@ fn describe_row(app: &App, item: &UnmappableItem) -> String {
 }
 
 fn body_summary_label(app: &App, moved_count: usize) -> String {
-    let review_level = app.session.review_comments.len();
+    let review_level = app.postable_review_comments().len();
     match (review_level, moved_count) {
         (0, 0) => "empty".to_string(),
         (n, 0) => format!("{n} review comment{s}", s = plural(n)),
@@ -539,6 +535,7 @@ mod tests {
             label: "\u{1F4AC} note".to_string(),
             definition: None,
             color: None,
+            forge: false,
         }];
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Comment,

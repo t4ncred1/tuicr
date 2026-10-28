@@ -76,7 +76,10 @@ impl App {
                 continue;
             };
             for comment in &review.file_comments {
-                if comment.is_locked() || !self.comment_visible(comment) {
+                if comment.is_locked()
+                    || !self.comment_visible(comment)
+                    || !submit_ctx.is_postable(&comment.comment_type)
+                {
                     continue;
                 }
                 total_local_drafts += 1;
@@ -90,7 +93,10 @@ impl App {
             keys.sort();
             for key in keys {
                 for comment in &review.line_comments[key] {
-                    if comment.is_locked() || !self.comment_visible(comment) {
+                    if comment.is_locked()
+                        || !self.comment_visible(comment)
+                        || !submit_ctx.is_postable(&comment.comment_type)
+                    {
                         continue;
                     }
                     total_local_drafts += 1;
@@ -116,7 +122,7 @@ impl App {
         // draft comment or a review-level comment, otherwise there's
         // nothing to submit.
         let bare_allowed = matches!(event, crate::forge::submit::SubmitEvent::Approve);
-        if !bare_allowed && total_local_drafts == 0 && self.session.review_comments.is_empty() {
+        if !bare_allowed && total_local_drafts == 0 && self.postable_review_comments().is_empty() {
             self.set_warning("Nothing to submit — no local-draft comments");
             return;
         }
@@ -310,14 +316,10 @@ impl App {
             .collect();
         let summary_comment_ids: Vec<String> =
             summary_items.iter().map(|i| i.comment.id.clone()).collect();
-        let review_comment_ids: Vec<String> = self
-            .session
-            .review_comments
-            .iter()
-            .map(|c| c.id.clone())
-            .collect();
+        let review_level = self.postable_review_comments();
+        let review_comment_ids: Vec<String> = review_level.iter().map(|c| c.id.clone()).collect();
         let body = build_review_body(
-            &self.session.review_comments,
+            &review_level,
             &summary_items,
             SubmitContext::new(&self.forge_config, &self.comment_types),
         );
@@ -439,6 +441,23 @@ impl App {
             DiffSource::PullRequest(pr) => pr.key.repository.kind.display_name(),
             _ => "forge",
         }
+    }
+
+    /// The review-level comments `:submit` puts in the review body: those of
+    /// a type it posts (`SubmitContext::is_postable`).
+    pub fn postable_review_comments(&self) -> Vec<crate::model::Comment> {
+        let ctx = crate::forge::submit::SubmitContext::new(&self.forge_config, &self.comment_types);
+        self.session
+            .review_comments
+            .iter()
+            .filter(|comment| ctx.is_postable(&comment.comment_type))
+            .cloned()
+            .collect()
+    }
+
+    /// Whether the review is of a forge pull request rather than local changes.
+    pub fn is_pull_request_review(&self) -> bool {
+        matches!(self.diff_source, DiffSource::PullRequest(_))
     }
 
     /// Return the forge backing the active PR/MR diff, when reviewing one.

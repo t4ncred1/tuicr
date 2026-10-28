@@ -842,24 +842,28 @@ mod tests {
                 label: "note".to_string(),
                 definition: Some("observations".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "suggestion".to_string(),
                 label: "suggestion".to_string(),
                 definition: Some("improvements".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "issue".to_string(),
                 label: "issue".to_string(),
                 definition: Some("problems to fix".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "praise".to_string(),
                 label: "praise".to_string(),
                 definition: Some("positive feedback".to_string()),
                 color: None,
+                forge: false,
             },
         ]
     }
@@ -1066,6 +1070,7 @@ mod tests {
             label: "question".to_string(),
             definition: Some("ask for clarification".to_string()),
             color: None,
+            forge: false,
         }];
 
         let markdown = generate_markdown(
@@ -1779,6 +1784,7 @@ mod tests {
             label: CommentType::NONE_ID.to_string(),
             definition: None,
             color: None,
+            forge: false,
         }];
         let markdown = generate_markdown(
             &session,
@@ -1988,12 +1994,14 @@ mod tests {
                 label: "question".to_string(),
                 definition: Some("ask for clarification".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "issue".to_string(),
                 label: "issue".to_string(),
                 definition: Some("problems to fix".to_string()),
                 color: None,
+                forge: false,
             },
         ];
 

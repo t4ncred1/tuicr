@@ -1151,47 +1151,45 @@ impl App {
     }
 
     pub fn cycle_comment_type(&mut self) {
-        if self.comment_types.is_empty() {
-            return;
-        }
-        if self.comment_types.len() == 1 {
-            self.set_message("Only one comment type configured");
-            return;
-        }
-
-        let current_id = self.comment_type.id().to_string();
-        let current_index = self
-            .comment_types
-            .iter()
-            .position(|comment_type| comment_type.id == current_id)
-            .unwrap_or(0);
-        let next_index = (current_index + 1) % self.comment_types.len();
-        let next_id = self.comment_types[next_index].id.clone();
-        self.comment_type = CommentType::from_id(&next_id);
-        self.announce_comment_type();
+        self.step_comment_type(true);
     }
 
     pub fn cycle_comment_type_reverse(&mut self) {
-        if self.comment_types.is_empty() {
-            return;
-        }
-        if self.comment_types.len() == 1 {
-            self.set_message("Only one comment type configured");
-            return;
+        self.step_comment_type(false);
+    }
+
+    /// The comment types Tab offers here: `forge` types only in PR reviews,
+    /// where there is a forge to post them to.
+    pub(in crate::app) fn offered_comment_types(&self) -> Vec<&CommentTypeDefinition> {
+        let pr_review = self.is_pull_request_review();
+        self.comment_types
+            .iter()
+            .filter(|comment_type| pr_review || !comment_type.forge)
+            .collect()
+    }
+
+    fn step_comment_type(&mut self, forward: bool) {
+        let offered = self.offered_comment_types();
+        match offered.len() {
+            0 => return,
+            1 => {
+                self.set_message("Only one comment type configured");
+                return;
+            }
+            _ => {}
         }
 
         let current_id = self.comment_type.id();
-        let current_index = self
-            .comment_types
+        let current_index = offered
             .iter()
             .position(|comment_type| comment_type.id == current_id)
             .unwrap_or(0);
-        let prev_index = if current_index == 0 {
-            self.comment_types.len() - 1
+        let next_index = if forward {
+            (current_index + 1) % offered.len()
         } else {
-            current_index - 1
+            (current_index + offered.len() - 1) % offered.len()
         };
-        self.comment_type = CommentType::from_id(&self.comment_types[prev_index].id);
+        self.comment_type = CommentType::from_id(&offered[next_index].id);
         self.announce_comment_type();
     }
 

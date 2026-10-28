@@ -1452,3 +1452,124 @@ fn should_yank_top_level_pr_comment() {
         Some("Top-level PR comment".to_string())
     );
 }
+
+/// `claude` stays local, `pr` is meant for the forge, and `none` is the
+/// untyped entry `resolve_comment_types` appends.
+fn forge_routed_comment_types() -> Vec<CommentTypeDefinition> {
+    let local = |id: &str| CommentTypeDefinition {
+        id: id.to_string(),
+        label: id.to_string(),
+        definition: None,
+        color: None,
+        forge: false,
+    };
+    vec![
+        local("claude"),
+        CommentTypeDefinition {
+            forge: true,
+            ..local("pr")
+        },
+        local("none"),
+    ]
+}
+
+fn typed_line_comment(type_id: &str) -> Comment {
+    let mut comment = line_comment(LineSide::New, Some(11), None);
+    comment.comment_type = CommentType::from_id(type_id);
+    comment
+}
+
+#[test]
+fn should_submit_only_forge_type_comments_once_one_is_configured() {
+    // given a claude comment, an untyped note and a pr comment on one line
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    let pr_comment = typed_line_comment("pr");
+    let pr_id = pr_comment.id.clone();
+    add_line_comment(&mut app, "src/lib.rs", 11, typed_line_comment("claude"));
+    add_line_comment(&mut app, "src/lib.rs", 11, typed_line_comment("none"));
+    add_line_comment(&mut app, "src/lib.rs", 11, pr_comment);
+
+    // when
+    app.start_submit(SubmitEvent::Comment);
+
+    // then only the pr comment is posted, without a type tag
+    let state = app.submit_state.as_ref().expect("submit state");
+    assert_eq!(state.mappable.len(), 1);
+    assert_eq!(state.mappable[0].comment_id, pr_id);
+    assert_eq!(state.mappable[0].body, "body");
+}
+
+#[test]
+fn should_find_nothing_to_submit_when_every_comment_stays_local() {
+    // given only a claude comment and an untyped review-level note
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    add_line_comment(&mut app, "src/lib.rs", 11, typed_line_comment("claude"));
+    app.session.review_comments.push(Comment::new(
+        "my own note".to_string(),
+        CommentType::None,
+        None,
+    ));
+
+    // when
+    app.start_submit(SubmitEvent::Comment);
+
+    // then
+    assert_eq!(app.input_mode, InputMode::Normal);
+    assert!(app.submit_state.is_none());
+}
+
+#[test]
+fn should_put_only_forge_type_review_comments_in_the_review_body() {
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    for type_id in ["claude", "pr", "none"] {
+        app.session.review_comments.push(Comment::new(
+            format!("{type_id} summary"),
+            CommentType::from_id(type_id),
+            None,
+        ));
+    }
+
+    let posted = app.postable_review_comments();
+
+    assert_eq!(posted.len(), 1);
+    assert_eq!(posted[0].content, "pr summary");
+}
+
+#[test]
+fn should_offer_forge_types_only_in_pr_reviews() {
+    // given a PR review: Tab reaches pr
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    app.enter_comment_mode(false, None);
+    assert_eq!(app.comment_type.id(), "claude");
+    app.cycle_comment_type();
+    assert_eq!(app.comment_type.id(), "pr");
+
+    // when the same types are used outside a PR review
+    app.exit_comment_mode();
+    app.diff_source = DiffSource::StagedAndUnstaged;
+    app.enter_comment_mode(false, None);
+
+    // then Tab skips pr
+    app.cycle_comment_type();
+    assert_eq!(app.comment_type.id(), "none");
+    app.cycle_comment_type_reverse();
+    assert_eq!(app.comment_type.id(), "claude");
+}
+
+#[test]
+fn should_not_default_to_a_forge_type_outside_pr_reviews() {
+    // given pr listed first, outside a PR review
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    let mut types = forge_routed_comment_types();
+    types.swap(0, 1);
+    app.comment_types = types;
+    app.diff_source = DiffSource::StagedAndUnstaged;
+
+    app.enter_comment_mode(false, None);
+
+    assert_eq!(app.comment_type.id(), "claude");
+}
