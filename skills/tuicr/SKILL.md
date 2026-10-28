@@ -291,6 +291,11 @@ changes. If you move to another
 worktree mid-review, run it again for the new directory. Outside Herdr, use the
 launchers under "Start A Session".
 
+When the review is over, `<skill-directory>/tuicr-herdr-close.sh "$PWD"`
+saves and quits every tuicr tab open for that repository. It never forces a
+tab: one with a comment being typed or an editor open is reported as
+`left open <label>: <reason>` and stays, for the user to finish.
+
 Then run `tuicr-watch.sh` (in this skill directory) as a long-running
 background monitor whose output lines reach you as notifications — in Claude
 Code, the `Monitor` tool. Use the maximum timeout and start it with `--reset`
