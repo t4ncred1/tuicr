@@ -25,6 +25,9 @@
 #   JQ_BIN                 jq executable (default: jq)
 #   TUICR_WATCH_AGENT      author name the agent replies with (default: Claude)
 #   TUICR_WATCH_INTERVAL   seconds between polls (default: 2)
+#   TUICR_WATCH_TYPES      comma-separated comment type ids to report, such as
+#                          `claude`; threads of other types (`none` for
+#                          untyped) stay private. Unset reports every type.
 #   TUICR_WATCH_STATE_DIR  where reported keys are recorded
 #                          (default: ${XDG_STATE_HOME:-~/.local/state}/tuicr/watch)
 set -u -o pipefail
@@ -33,6 +36,7 @@ TUICR_BIN="${TUICR_BIN:-tuicr}"
 JQ_BIN="${JQ_BIN:-jq}"
 AGENT_NAME="${TUICR_WATCH_AGENT:-Claude}"
 INTERVAL="${TUICR_WATCH_INTERVAL:-2}"
+WATCH_TYPES="${TUICR_WATCH_TYPES:-}"
 STATE_DIR="${TUICR_WATCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/tuicr/watch}"
 
 reset=false
@@ -66,6 +70,7 @@ touch "$state_file" || fail "cannot write $state_file"
 # line to print. `location` matches what `tuicr review comments` reports.
 open_threads_filter='
   .[]
+  | select($types == "" or (.comment_type as $type | $types | split(",") | index($type)))
   | (if (.replies // []) | length > 0 then .replies[-1] else . end) as $last
   | select($last.author != $agent)
   | {
@@ -96,7 +101,8 @@ while true; do
         # Recorded after printing: a crash in between re-reports, never drops.
         printf '%s\n' "$key" >>"$state_file"
       done < <(printf '%s' "$comments" |
-        "$JQ_BIN" -c --arg agent "$AGENT_NAME" "$open_threads_filter" 2>/dev/null)
+        "$JQ_BIN" -c --arg agent "$AGENT_NAME" --arg types "$WATCH_TYPES" \
+          "$open_threads_filter" 2>/dev/null)
     fi
   fi
 

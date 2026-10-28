@@ -319,6 +319,11 @@ reported again until the user responds. Pass `--username` matching
 `TUICR_WATCH_AGENT` (default `Claude`), or your replies will not count as
 answers.
 
+Set `TUICR_WATCH_TYPES` to a comma-separated list of comment type ids (for
+example `claude`) when the user keeps some comments to themselves: threads of
+other types are never reported, and untyped comments count as type `none`.
+Treat those threads as private when you read the session directly too.
+
 When the monitor expires, start it again **without** `--reset`: the watcher
 remembers what it reported, so only new activity comes through. It stays
 silent while no tuicr session is open, and picks a session up as soon as one

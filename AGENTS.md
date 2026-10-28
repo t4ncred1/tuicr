@@ -129,7 +129,7 @@ src/
 Repository-managed agent integrations:
 
 - `skills/tuicr/` - Shared agent skill bundle for coding agents, for example Claude Code, Codex, and similar tools; launches tuicr in a cmux, tmux, Zellij, or Herdr split pane
-- `skills/tuicr/tuicr-watch.sh` - long-running watcher an agent runs as a background monitor (Claude Code's `Monitor` tool); prints one line per open thread (last entry not the agent's) in the repo's active local session, so feedback wakes an idle agent. Reported keys persist in a state file so a re-armed monitor only sees new activity
+- `skills/tuicr/tuicr-watch.sh` - long-running watcher an agent runs as a background monitor (Claude Code's `Monitor` tool); prints one line per open thread (last entry not the agent's) in the repo's active local session, so feedback wakes an idle agent. Reported keys persist in a state file so a re-armed monitor only sees new activity. `TUICR_WATCH_TYPES` limits it to the listed comment type ids (`none` for untyped), so a reviewer's other comments stay private
 - `skills/tuicr/tuicr-herdr-tab.sh` - opens tuicr for a directory (an agent passes its current one, which follows it across worktrees; a Herdr keybinding falls back to the active pane's) in a `tuicr <repo>` tab, or focuses that repo's existing tab. The tab goes in the workspace of the agent pane working in that repository (matched by git common dir), not `$HERDR_WORKSPACE_ID`: a Claude Code background session inherits the Herdr variables of whichever pane pre-started its process. Reviews with `--branch` unless given tuicr args; when tuicr fails to start, the tab waits for Enter so the error stays readable. Returns without waiting
 
 ### Key Types
