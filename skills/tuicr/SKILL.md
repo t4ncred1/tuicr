@@ -303,13 +303,20 @@ when you begin watching, so every thread already open is reported once:
 When you move to another worktree, stop the watcher and start it again with
 `--reset` for the new directory.
 
-It polls the repo's active local session and prints one line per event:
+It polls the repo's active local session and prints one line per event. To
+watch a pull request review instead, pass its slug: `--session
+gh:owner/repo/pr/N` (a PR session is never picked automatically, so a branch
+review and a PR review can be open side by side).
 
 - `tuicr: watching session <slug>` — a session is open; use this slug.
 - `tuicr: open thread <id> <location> - @<author>: <text>` — a thread now
   waits on you: a new comment, an edited one, or a reply to your answer. The
   text is cut at 300 characters; read the full thread with
   `tuicr review comments --session <slug>`.
+- The same line ending in `(re @<reviewer>: <their comment>)` — the comment
+  answers a forge review thread (its `reply_to_thread`): the quoted reviewer
+  comment is what is being asked, the user's text is their instruction about
+  it.
 - `tuicr: error: <message>` — the watcher has stopped; fix the cause and
   start it again.
 

@@ -10,15 +10,22 @@
 # key is the thread id plus its last entry's id and content, so a new user
 # reply or an edited comment is reported again, and nothing else is.
 #
-# Usage: tuicr-watch.sh [--reset] [directory]
+# Usage: tuicr-watch.sh [--reset] [--session <slug>] [directory]
 #   --reset    forget what was already reported, so every open thread is
 #              printed again (use when a fresh agent session starts watching)
+#   --session  watch exactly this session, e.g. a PR review's
+#              `gh:owner/repo/pr/N`; without it the watcher follows the
+#              repository's most recently written active local session
 #   directory  repository to watch (default: current directory)
 #
 # Output lines (stdout is the event stream; keep it to these):
 #   tuicr: watching session <slug>
 #   tuicr: open thread <id> <location> - @<author>: <text>
+#   tuicr: open thread <id> <location> - @<author>: <text> (re @<reviewer>: <their comment>)
 #   tuicr: error: <message>
+#
+# The `(re …)` form marks a comment answering a forge review thread and
+# quotes the comment that opened it.
 #
 # Environment variables:
 #   TUICR_BIN              tuicr executable (default: tuicr)
@@ -40,10 +47,18 @@ WATCH_TYPES="${TUICR_WATCH_TYPES:-}"
 STATE_DIR="${TUICR_WATCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/tuicr/watch}"
 
 reset=false
-if [[ "${1:-}" == "--reset" ]]; then
-  reset=true
+session=""
+while (($# > 0)); do
+  case "$1" in
+    --reset) reset=true ;;
+    --session)
+      session="${2:-}"
+      shift
+      ;;
+    *) break ;;
+  esac
   shift
-fi
+done
 target_dir="${1:-$PWD}"
 
 fail() {
@@ -54,6 +69,7 @@ fail() {
 command -v "$TUICR_BIN" &>/dev/null || fail "$TUICR_BIN not found on PATH"
 command -v "$JQ_BIN" &>/dev/null || fail "$JQ_BIN not found on PATH"
 [[ -d "$target_dir" ]] || fail "directory not found: $target_dir"
+[[ -z "$session" || "$session" != --* ]] || fail "--session needs a session slug"
 
 # `tuicr review list --repo` only matches the repository root.
 repo_root=$(git -C "$target_dir" rev-parse --show-toplevel 2>/dev/null) ||
@@ -62,7 +78,7 @@ repo_root=$(git -C "$target_dir" rev-parse --show-toplevel 2>/dev/null) ||
   repo_root=$(cd "$target_dir" && pwd)
 
 mkdir -p "$STATE_DIR" || fail "cannot create $STATE_DIR"
-state_file="$STATE_DIR/$(printf '%s\n%s' "$repo_root" "$AGENT_NAME" | sha1sum | cut -d' ' -f1)"
+state_file="$STATE_DIR/$(printf '%s\n%s\n%s' "$repo_root" "$AGENT_NAME" "$session" | sha1sum | cut -d' ' -f1)"
 $reset && : >"$state_file"
 touch "$state_file" || fail "cannot write $state_file"
 
@@ -76,15 +92,23 @@ open_threads_filter='
   | {
       key: (.id + ":" + ($last.id // .id) + ":" + $last.content),
       line: ("tuicr: open thread \(.id) \(.location) - @\($last.author): "
-        + ($last.content | gsub("[\r\n]+"; " ") | .[0:300]))
+        + ($last.content | gsub("[\r\n]+"; " ") | .[0:300])
+        + (.reply_to_thread.comments[0] // null
+          | if . == null then ""
+            else " (re @\(.author): \(.body | gsub("[\r\n]+"; " ") | .[0:200]))"
+            end))
     }'
 
 current_slug=""
 while true; do
-  # The most recently written active session is where the user is typing.
-  slug=$("$TUICR_BIN" review list --repo "$repo_root" 2>/dev/null |
-    "$JQ_BIN" -r '[.[] | select(.active and .kind == "local")]
-      | sort_by(.updated_at) | last | .slug // empty') || slug=""
+  if [[ -n "$session" ]]; then
+    slug="$session"
+  else
+    # The most recently written active session is where the user is typing.
+    slug=$("$TUICR_BIN" review list --repo "$repo_root" 2>/dev/null |
+      "$JQ_BIN" -r '[.[] | select(.active and .kind == "local")]
+        | sort_by(.updated_at) | last | .slug // empty') || slug=""
+  fi
 
   if [[ -n "$slug" ]]; then
     if [[ "$slug" != "$current_slug" ]]; then
