@@ -50,6 +50,36 @@ impl<'a> SubmitContext<'a> {
 
         comment_type.as_str()
     }
+
+    /// The `[TYPE] ` text submit puts in front of a comment of this type, or
+    /// an empty string when it sends none: the prefix is disabled, the
+    /// comment is untyped, or its type is a `forge` type, which is meant for
+    /// the forge and needs no tag there.
+    pub fn posted_tag(&self, comment_type: &CommentType) -> String {
+        if !self.forge.comment_type_prefix || self.is_forge_type(comment_type) {
+            return String::new();
+        }
+        let label = self.type_label(comment_type);
+        if label.is_empty() {
+            String::new()
+        } else {
+            format!("[{label}] ")
+        }
+    }
+
+    /// Whether `:submit` posts comments of this type: every type, until a
+    /// configured type sets `forge`; from then on only the `forge` types, so
+    /// the rest stay local.
+    pub fn is_postable(&self, comment_type: &CommentType) -> bool {
+        !self.comment_types.iter().any(|definition| definition.forge)
+            || self.is_forge_type(comment_type)
+    }
+
+    fn is_forge_type(&self, comment_type: &CommentType) -> bool {
+        self.comment_types
+            .iter()
+            .any(|definition| definition.forge && definition.id == comment_type.id())
+    }
 }
 
 /// Which forge review event a `:submit*` command corresponds to.
@@ -217,14 +247,10 @@ fn build_inline_body(comment: &Comment, file_level: bool, ctx: SubmitContext<'_>
     if !ctx.forge.comment_type_prefix {
         return comment.content.clone();
     }
-    // `None` comments carry no `[TYPE]` tag, but file-level ones keep the
-    // `File-level:` marker so the reader still knows where the comment applies.
-    let label = ctx.type_label(&comment.comment_type);
-    let type_tag = if label.is_empty() {
-        String::new()
-    } else {
-        format!("[{label}] ")
-    };
+    // Untyped and `forge`-type comments carry no `[TYPE]` tag, but file-level
+    // ones keep the `File-level:` marker so the reader still knows where the
+    // comment applies.
+    let type_tag = ctx.posted_tag(&comment.comment_type);
     let prefix = if file_level {
         format!("{type_tag}File-level: ")
     } else {
@@ -578,10 +604,7 @@ pub fn build_review_body(
             if i > 0 {
                 block.push_str("\n\n");
             }
-            let label = ctx.type_label(&c.comment_type);
-            if ctx.forge.comment_type_prefix && !label.is_empty() {
-                block.push_str(&format!("[{label}] "));
-            }
+            block.push_str(&ctx.posted_tag(&c.comment_type));
             block.push_str(&c.content);
         }
         sections.push(block);
@@ -590,12 +613,7 @@ pub fn build_review_body(
     if !moved_to_summary.is_empty() {
         let mut block = String::from("## Unplaced comments\n");
         for item in moved_to_summary {
-            let label = ctx.type_label(&item.comment.comment_type);
-            let prefix = if ctx.forge.comment_type_prefix && !label.is_empty() {
-                format!("[{label}] ")
-            } else {
-                String::new()
-            };
+            let prefix = ctx.posted_tag(&item.comment.comment_type);
             let path = item.file.display();
             block.push_str(&format!(
                 "- {prefix}{path}: {body}\n",
@@ -675,18 +693,21 @@ mod tests {
                 label: "issue".to_string(),
                 definition: None,
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "note".to_string(),
                 label: "note".to_string(),
                 definition: None,
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "emoji".to_string(),
                 label: "\u{1F4AC} note".to_string(),
                 definition: None,
                 color: None,
+                forge: false,
             },
         ]
     }
@@ -1153,6 +1174,63 @@ mod tests {
             }
             other => panic!("expected Inline, got {other:?}"),
         }
+    }
+
+    // `forge` comment types
+
+    /// `claude` stays local; `pr` is the type meant for the forge.
+    fn forge_routed_types() -> Vec<CommentTypeDefinition> {
+        let local = |id: &str| CommentTypeDefinition {
+            id: id.to_string(),
+            label: id.to_string(),
+            definition: None,
+            color: None,
+            forge: false,
+        };
+        vec![
+            local("claude"),
+            CommentTypeDefinition {
+                forge: true,
+                ..local("pr")
+            },
+        ]
+    }
+
+    #[test]
+    fn should_post_every_type_when_no_type_is_a_forge_type() {
+        let cfg = default_config();
+        let types = test_comment_types();
+        let ctx = ctx_of(&cfg, &types);
+
+        assert!(ctx.is_postable(&CommentType::from_id("issue")));
+        assert!(ctx.is_postable(&CommentType::None));
+    }
+
+    #[test]
+    fn should_post_only_forge_types_once_one_is_configured() {
+        let cfg = default_config();
+        let types = forge_routed_types();
+        let ctx = ctx_of(&cfg, &types);
+
+        assert!(ctx.is_postable(&CommentType::from_id("pr")));
+        assert!(!ctx.is_postable(&CommentType::from_id("claude")));
+        assert!(!ctx.is_postable(&CommentType::None));
+    }
+
+    #[test]
+    fn should_post_forge_type_comments_without_a_type_tag() {
+        let cfg = default_config();
+        let types = forge_routed_types();
+        let ctx = ctx_of(&cfg, &types);
+
+        assert_eq!(ctx.posted_tag(&CommentType::from_id("pr")), "");
+        assert_eq!(ctx.posted_tag(&CommentType::from_id("claude")), "[CLAUDE] ");
+        let comments = vec![Comment::new(
+            "please rename".to_string(),
+            CommentType::from_id("pr"),
+            None,
+        )];
+        assert_eq!(build_review_body(&comments, &[], ctx), "please rename");
     }
 
     // build_review_body

@@ -733,6 +733,7 @@ impl App {
             label: CommentType::NONE_ID.to_string(),
             definition: None,
             color: None,
+            forge: false,
         }
     }
 
@@ -760,6 +761,7 @@ impl App {
                 label,
                 definition,
                 color,
+                forge: config.forge,
             });
         }
 
@@ -786,8 +788,13 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// The first type Tab offers here, so a `forge` type listed first does
+    /// not become the default outside PR reviews.
     pub(in crate::app) fn default_comment_type(&self) -> CommentType {
-        Self::first_comment_type(&self.comment_types)
+        self.offered_comment_types()
+            .first()
+            .map(|comment_type| CommentType::from_id(&comment_type.id))
+            .unwrap_or_default()
     }
 
     fn parse_config_color(value: &str) -> Option<Color> {

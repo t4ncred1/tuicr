@@ -257,6 +257,25 @@ Comment categories control:
 | `label`      | no       | Visible tag in the UI, export, and submitted comments (`[QUESTION]`, `[NITPICK]`). Defaults to `id` uppercased. |
 | `definition` | no       | Guidance text for LLMs, included in the exported `Comment types:` legend.               |
 | `color`      | no       | Comment badge / border color. Terminal name (`yellow`, `light_red`) or hex (`#RRGGBB`). |
+| `forge`      | no       | `true` marks a type meant for the forge. See [Forge-only types](#forge-only-types). Defaults to `false`. |
+
+### Forge-only types
+
+A type with `forge = true` is meant for the pull request. It is offered in the Tab cycle only
+while reviewing a PR or MR, and its comments are posted without the `[TYPE]` tag. As soon as any
+configured type sets `forge`, `:submit` posts **only** the `forge` types: every other comment,
+untyped ones included, stays a local draft. Without any `forge` type, `:submit` posts every
+comment as before.
+
+```toml
+comment_types = [
+  { id = "claude", definition = "for the coding agent; never posted" },
+  { id = "pr", label = "PR", color = "green", forge = true },
+]
+```
+
+Here `claude` stays the default everywhere, `pr` appears only in PR reviews and is what `:submit`
+sends, and untyped comments are private notes.
 
 ### Defaults
 
