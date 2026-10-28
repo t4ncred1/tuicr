@@ -131,6 +131,20 @@ impl DiffFile {
             .map(|hunk| self.hunk_review_key_with_counts(hunk, &hash_counts))
     }
 
+    /// Whether a hunk shows `line` on `side`: a comment anchored there renders.
+    pub fn contains_line(&self, line: u32, side: LineSide) -> bool {
+        self.hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .any(|diff_line| {
+                let lineno = match side {
+                    LineSide::Old => diff_line.old_lineno,
+                    LineSide::New => diff_line.new_lineno,
+                };
+                lineno == Some(line)
+            })
+    }
+
     pub fn hunk_review_keys(&self) -> Vec<String> {
         let hash_counts = self.hunk_content_hash_counts();
         self.hunks

@@ -764,19 +764,34 @@ impl App {
             .filter(|key| valid_hunks.contains(*key))
             .cloned()
             .collect();
-        let (file_comments, line_comments) = if unchanged_file {
-            (
-                previous_review
-                    .file_comments
-                    .iter()
-                    .filter(|comment| !comment.is_locked())
-                    .cloned()
-                    .collect(),
-                Self::line_draft_comments_carried_forward(previous_review),
-            )
-        } else {
-            (review.file_comments, review.line_comments)
-        };
+        let mut file_comments: Vec<_> = previous_review
+            .file_comments
+            .iter()
+            .filter(|comment| !comment.is_locked())
+            .cloned()
+            .collect();
+        let mut line_comments = Self::line_draft_comments_carried_forward(previous_review);
+        // A changed file keeps its drafts too: they are often the threads that
+        // asked for the change. A line comment whose line left the diff would
+        // never render, so it falls back to a file comment.
+        if !unchanged_file {
+            let mut detached = Vec::new();
+            line_comments.retain(|line, comments| {
+                comments.retain(|comment| {
+                    let side = comment.side.unwrap_or(LineSide::New);
+                    if file.contains_line(*line, side) {
+                        return true;
+                    }
+                    let mut comment = comment.clone();
+                    comment.side = None;
+                    comment.line_range = None;
+                    detached.push(comment);
+                    false
+                });
+                !comments.is_empty()
+            });
+            file_comments.extend(detached);
+        }
 
         (
             path,

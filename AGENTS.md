@@ -291,7 +291,7 @@ In-flight requests carry an identity tuple (repo, PR#, head SHA). A late result 
 
 ### Session key + lifecycle
 
-`PrSessionKey { repository, number, head_sha }` identifies a PR review session. Same PR + same head = same session = drafts reattach. New commit on the PR = new key = new session, seeded from the previous head's session of the same repository (host included) and PR (unchanged files keep reviewed marks and drafts) whether the head moved during a reload or between opens. Seeding is best-effort: an unreadable old-head session gives a fresh one.
+`PrSessionKey { repository, number, head_sha }` identifies a PR review session. Same PR + same head = same session = drafts reattach. New commit on the PR = new key = new session, seeded from the previous head's session of the same repository (host included) and PR (unchanged files keep reviewed marks; every file keeps its unsubmitted drafts, and on a changed file a line comment whose line left the diff becomes a file comment) whether the head moved during a reload or between opens. Seeding is best-effort: an unreadable old-head session gives a fresh one.
 
 Each `Comment` carries a `lifecycle` field:
 

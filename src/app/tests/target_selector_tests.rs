@@ -1839,7 +1839,7 @@ fn should_carry_reviewed_marks_for_unchanged_files_when_pr_head_advances() {
         .unwrap();
 
     // then unchanged files stay reviewed, changed files reopen, and
-    // draft comments on unchanged files move to the new head.
+    // draft comments on both files move to the new head.
     assert!(head_changed);
     assert!(app.session.is_file_reviewed(&stable_path));
     assert!(!app.session.is_file_reviewed(&changed_path));
@@ -1847,7 +1847,11 @@ fn should_carry_reviewed_marks_for_unchanged_files_when_pr_head_advances() {
     assert_eq!(stable_review.file_comments.len(), 1);
     assert_eq!(stable_review.file_comments[0].content, "old-head draft");
     let changed_review = app.session.files.get(&changed_path).unwrap();
-    assert!(changed_review.file_comments.is_empty());
+    assert_eq!(changed_review.file_comments.len(), 1);
+    assert_eq!(
+        changed_review.file_comments[0].content,
+        "changed-file draft"
+    );
 }
 
 #[test]
@@ -1917,6 +1921,75 @@ fn should_build_new_head_session_by_carrying_only_unchanged_reviewed_state() {
             .reviewed_hunks
             .is_empty()
     );
+}
+
+#[test]
+fn should_carry_draft_threads_on_changed_files_when_pr_head_advances() {
+    // given an old-head PR session with drafts on a file the next head changes:
+    // a replied thread on a line still in the diff, one on a line that leaves
+    // it, and an already submitted comment
+    let mut app = build_app();
+    let summary = sample_pr(424249, "head-a");
+    let mut details_a = test_pr_details(424249, "head-a");
+    details_a.head_sha = "aaaaaaaaaaaaaaaa".to_string();
+    let backend_a = Box::new(FakeForgeBackend::open_pr_details(
+        details_a.clone(),
+        two_file_patch("new changed"),
+    ));
+    app.open_pr_with_backend(&summary, backend_a, None).unwrap();
+    let changed_path = PathBuf::from("src/changed.rs");
+    let mut kept = Comment::new(
+        "rename this".to_string(),
+        CommentType::from_id("claude"),
+        None,
+    );
+    kept.replies.push(crate::model::CommentReply::new(
+        "renamed".to_string(),
+        "Claude",
+    ));
+    let mut detached = Comment::new(
+        "and this one".to_string(),
+        CommentType::from_id("claude"),
+        Some(LineSide::New),
+    );
+    detached.line_range = Some(LineRange::new(6, 7));
+    let mut submitted = Comment::new("posted".to_string(), CommentType::from_id("note"), None);
+    submitted.lifecycle_state = crate::model::comment::CommentLifecycleState::Submitted;
+    let changed = app.session.get_file_mut(&changed_path).unwrap();
+    changed.add_line_comment(1, kept);
+    changed.add_line_comment(7, detached);
+    changed.add_line_comment(1, submitted);
+    let previous = app.session.clone();
+
+    // when the next head changes that file
+    let mut details_b = details_a.clone();
+    details_b.head_sha = "bbbbbbbbbbbbbbbb".to_string();
+    let highlighter = app.theme.syntax_highlighter();
+    let pr_info_b = crate::forge::traits::PullRequestInfo::from_details(details_b.clone());
+    let opened = crate::forge::pr_open::prepare_open_pr(
+        details_b,
+        structured_patch(&two_file_patch("newer changed")),
+        Vec::new(),
+        PullRequestReviewMetadata::default(),
+        pr_info_b,
+        None,
+        highlighter,
+    )
+    .unwrap();
+    let next =
+        App::reviewed_state_carried_forward(&previous, opened.session.clone(), &opened.diff_files);
+
+    // then the drafts survive with their replies, the one whose line left
+    // the diff as a file comment, and the submitted comment is not carried.
+    let changed = next.files.get(&changed_path).unwrap();
+    assert_eq!(changed.line_comments.len(), 1);
+    assert_eq!(changed.line_comments[&1].len(), 1);
+    assert_eq!(changed.line_comments[&1][0].content, "rename this");
+    assert_eq!(changed.line_comments[&1][0].replies.len(), 1);
+    assert_eq!(changed.file_comments.len(), 1);
+    assert_eq!(changed.file_comments[0].content, "and this one");
+    assert_eq!(changed.file_comments[0].side, None);
+    assert_eq!(changed.file_comments[0].line_range, None);
 }
 
 #[test]
