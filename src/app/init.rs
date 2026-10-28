@@ -151,6 +151,61 @@ impl App {
         let vcs_info = vcs.info().clone();
         let highlighter =
             crate::profile::time("startup.syntax_highlighter", || theme.syntax_highlighter());
+        // Branch review: the branch's own commits plus the working tree, in a
+        // session keyed by the branch so it survives new commits.
+        if let Some(base) = options.branch {
+            if vcs_info.branch_name.is_none() {
+                return Err(TuicrError::InvalidInput(
+                    "--branch needs a checked-out branch, but HEAD is detached".into(),
+                ));
+            }
+            let commit_ids = Self::resolve_branch_commits(vcs.as_ref(), &vcs_info.root_path, base)?;
+            let diff_files = if commit_ids.is_empty() {
+                Self::get_working_tree_diff_with_ignore(
+                    vcs.as_ref(),
+                    &vcs_info.root_path,
+                    highlighter,
+                    options.path_filter,
+                )?
+            } else {
+                Self::get_working_tree_with_commits_diff_with_ignore(
+                    vcs.as_ref(),
+                    &vcs_info.root_path,
+                    &commit_ids,
+                    highlighter,
+                    options.path_filter,
+                )?
+            };
+            let session = Self::load_or_create_session(&vcs_info, SessionDiffSource::Branch);
+
+            let mut app = Self::build(
+                vcs,
+                vcs_info,
+                theme,
+                comment_type_configs,
+                output_to_stdout,
+                diff_files,
+                session,
+                DiffSource::StagedAndUnstaged,
+                InputMode::Normal,
+                Vec::new(),
+                options.path_filter,
+                options.repo_url_override.clone(),
+            )?
+            .with_vcs_open_options(options.vcs_open_options());
+
+            app.branch_review = Some(BranchReview {
+                base: base.map(str::to_string),
+            });
+            app.install_branch_commits(commit_ids)?;
+            app.range_diff_files = Some(app.diff_files.clone());
+            app.insert_commit_message_if_single();
+            app.sort_files_by_directory(true);
+            app.expand_all_dirs();
+            app.rebuild_annotations();
+            return Ok(app);
+        }
+
         // Determine the diff source, files, and session based on input.
         // Four paths:
         //   1. -r + -w: combined commit range and uncommitted changes
@@ -495,6 +550,8 @@ impl App {
             diff_source,
             pending_editor_target: None,
             editor_override: None,
+            send_command: None,
+            send_clears_comments: false,
             editor_launches: Vec::new(),
             input_mode,
             focused_panel: FocusedPanel::Diff,
@@ -536,6 +593,8 @@ impl App {
             comment_is_file_level: true,
             comment_line: None,
             editing_comment_id: None,
+            replying_to_comment: false,
+            branch_review: None,
             visual_selection: None,
             mouse_drag_active: false,
             comment_line_range: None,
@@ -674,6 +733,7 @@ impl App {
             label: CommentType::NONE_ID.to_string(),
             definition: None,
             color: None,
+            forge: false,
         }
     }
 
@@ -701,6 +761,7 @@ impl App {
                 label,
                 definition,
                 color,
+                forge: config.forge,
             });
         }
 
@@ -727,8 +788,13 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// The first type Tab offers here, so a `forge` type listed first does
+    /// not become the default outside PR reviews.
     pub(in crate::app) fn default_comment_type(&self) -> CommentType {
-        Self::first_comment_type(&self.comment_types)
+        self.offered_comment_types()
+            .first()
+            .map(|comment_type| CommentType::from_id(&comment_type.id))
+            .unwrap_or_default()
     }
 
     fn parse_config_color(value: &str) -> Option<Color> {

@@ -578,6 +578,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled(
+                "  a         ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Reply to comment at cursor"),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "  dd        ",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
@@ -717,6 +724,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("Copy review to clipboard"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  :send     ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Pipe review to send_command"),
         ]),
         Line::from(vec![
             Span::styled(

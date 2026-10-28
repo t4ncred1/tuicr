@@ -54,7 +54,8 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
     let mut block = Block::default()
         .borders(if sole { Borders::NONE } else { Borders::ALL })
         .style(styles::panel_style(&app.theme))
-        .border_style(styles::border_style(&app.theme, focused));
+        .border_style(styles::border_style(&app.theme, focused))
+        .border_type(styles::pane_border_type(focused));
     if !sole {
         block = block
             .title(crate::ui::diff_view::diff_title(app, area.width))
@@ -161,7 +162,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                 &app.comment_buffer,
                 app.comment_cursor,
                 None,
-                true,
+                app.comment_input_kind(comment),
                 comment_width,
                 app.comment_vim_mode_label()
                     .as_ref()
@@ -198,6 +199,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                 None,
                 comment_width,
                 (comment.author != app.username).then_some(comment.author.as_str()),
+                &comment.replies,
             );
             for mut comment_line in comment_lines {
                 let indicator = cursor_indicator(line_idx, current_line_idx);
@@ -250,7 +252,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
             &app.comment_buffer,
             app.comment_cursor,
             None,
-            false,
+            comment_panel::CommentInputKind::Add,
             comment_width,
             app.comment_vim_mode_label()
                 .as_ref()
@@ -357,7 +359,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                         &app.comment_buffer,
                         app.comment_cursor,
                         None,
-                        true,
+                        app.comment_input_kind(comment),
                         comment_width,
                         app.comment_vim_mode_label()
                             .as_ref()
@@ -400,6 +402,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                         None,
                         comment_width,
                         (comment.author != app.username).then_some(comment.author.as_str()),
+                        &comment.replies,
                     );
                     for mut comment_line in comment_lines {
                         let indicator = cursor_indicator(line_idx, current_line_idx);
@@ -425,7 +428,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                 &app.comment_buffer,
                 app.comment_cursor,
                 None,
-                false,
+                comment_panel::CommentInputKind::Add,
                 comment_width,
                 app.comment_vim_mode_label()
                     .as_ref()
@@ -738,7 +741,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                                 &app.comment_buffer,
                                                 app.comment_cursor,
                                                 line_range,
-                                                true,
+                                                app.comment_input_kind(comment),
                                                 comment_width,
                                                 app.comment_vim_mode_label()
                                                     .as_ref()
@@ -813,6 +816,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                                 comment_width,
                                                 (comment.author != app.username)
                                                     .then_some(comment.author.as_str()),
+                                                &comment.replies,
                                             );
                                             for mut comment_line in comment_lines {
                                                 let is_current = line_idx == current_line_idx;
@@ -866,7 +870,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                     &app.comment_buffer,
                                     app.comment_cursor,
                                     line_range,
-                                    false,
+                                    comment_panel::CommentInputKind::Add,
                                     comment_width,
                                     app.comment_vim_mode_label()
                                         .as_ref()
@@ -926,7 +930,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                                 &app.comment_buffer,
                                                 app.comment_cursor,
                                                 line_range,
-                                                true,
+                                                app.comment_input_kind(comment),
                                                 comment_width,
                                                 app.comment_vim_mode_label()
                                                     .as_ref()
@@ -1001,6 +1005,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                                 comment_width,
                                                 (comment.author != app.username)
                                                     .then_some(comment.author.as_str()),
+                                                &comment.replies,
                                             );
                                             for mut comment_line in comment_lines {
                                                 let indicator =
@@ -1053,7 +1058,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                     &app.comment_buffer,
                                     app.comment_cursor,
                                     line_range,
-                                    false,
+                                    comment_panel::CommentInputKind::Add,
                                     comment_width,
                                     app.comment_vim_mode_label()
                                         .as_ref()
@@ -2245,7 +2250,9 @@ mod remote_comments_snapshot_tests {
             let col = row[..byte_col].chars().count();
             let gutter: String = cells[..col].concat();
             assert!(
-                gutter.chars().all(|c| c.is_whitespace() || c == '│'),
+                gutter
+                    .chars()
+                    .all(|c| c.is_whitespace() || c == '│' || c == '┃'),
                 "commit message row {y} should have no line number, got gutter {gutter:?}"
             );
         }

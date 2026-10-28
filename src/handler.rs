@@ -9,7 +9,9 @@ use crate::forge::remote_comments::PrCommentsVisibility;
 use crate::forge::submit::SubmitEvent;
 use crate::input::{Action, map_global_key};
 use crate::model::{ClearScope, LineSide};
-use crate::output::{copy_text_to_clipboard, export_to_clipboard, generate_export_content};
+use crate::output::{
+    copy_text_to_clipboard, export_to_clipboard, generate_export_content, send_to_command,
+};
 use crate::text_edit::{
     delete_char_before, delete_word_before, next_char_boundary, prev_char_boundary,
 };
@@ -31,6 +33,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec::new(&["e", "reload"], CommandKind::Reload),
     CommandSpec::new(&["edit"], CommandKind::Edit),
     CommandSpec::new(&["clip", "export"], CommandKind::Export),
+    CommandSpec::new(&["send"], CommandKind::Send),
     CommandSpec::new(&["copy-url"], CommandKind::CopyUrl),
     CommandSpec::new(
         &["clear"],
@@ -136,6 +139,7 @@ enum CommandKind {
     Reload,
     Edit,
     Export,
+    Send,
     CopyUrl,
     Clear(ClearScope),
     Help,
@@ -442,6 +446,40 @@ fn handle_export(app: &mut App) {
             Ok(msg) => app.set_message(msg),
             Err(e) => app.set_warning(format!("{e}")),
         }
+    }
+}
+
+/// Pipe the review to the configured `send_command` (`:send`), e.g. a script
+/// that hands it to a coding agent. With `send_clears_comments`, the sent
+/// comments are cleared so the next send carries only new feedback.
+fn handle_send(app: &mut App) {
+    let Some(command) = app.send_command.clone() else {
+        app.set_warning("No send_command configured");
+        return;
+    };
+    let slug = app.session_slug();
+    let content = match generate_export_content(
+        &app.session,
+        &app.diff_source,
+        &app.comment_types,
+        &app.export,
+        &app.forge_review_threads,
+        slug.as_deref(),
+    ) {
+        Ok(content) => content,
+        Err(e) => {
+            app.set_warning(format!("{e}"));
+            return;
+        }
+    };
+    match send_to_command(&command, &content) {
+        Ok(program) => {
+            if app.send_clears_comments {
+                app.clear_comments(ClearScope::CommentsOnly);
+            }
+            app.set_message(format!("Review sent to {program}"));
+        }
+        Err(e) => app.set_error(format!("{e}")),
     }
 }
 
@@ -902,6 +940,10 @@ fn dispatch_command(app: &mut App, kind: CommandKind) -> CommandAfterDispatch {
         }
         CommandKind::Export => {
             handle_export(app);
+            CommandAfterDispatch::ExitCommandMode
+        }
+        CommandKind::Send => {
+            handle_send(app);
             CommandAfterDispatch::ExitCommandMode
         }
         CommandKind::CopyUrl => {
@@ -1669,6 +1711,20 @@ fn edit_comment_at_cursor(app: &mut App, cursor_at_end: bool) {
     }
 }
 
+/// Replies are local-only, so unlike editing this works on a comment already
+/// pushed to the forge. Remote threads are not local comments and cannot be
+/// answered here.
+fn reply_to_comment_at_cursor(app: &mut App) {
+    if !app.enter_reply_mode() {
+        if app.cursor_on_remote_thread() {
+            let forge = app.forge_display_name();
+            app.set_message(format!("{forge} comment — read only in tuicr"));
+        } else {
+            app.set_message("No comment at cursor");
+        }
+    }
+}
+
 /// Handle actions when diff panel is focused
 pub fn handle_diff_action(app: &mut App, action: Action) {
     match action {
@@ -1826,6 +1882,7 @@ fn handle_shared_normal_action(app: &mut App, action: Action) {
         Action::EditComment => edit_comment_at_cursor(app, !app.comment_vim_enabled),
         // `A` (vim only) edits with the text cursor at end-of-line.
         Action::EditCommentAtEnd if app.comment_vim_enabled => edit_comment_at_cursor(app, true),
+        Action::ReplyToComment => reply_to_comment_at_cursor(app),
         Action::ExportToClipboard => handle_export(app),
         Action::CopyCommentAtCursor => handle_copy_comment_at_cursor(app),
         Action::SearchNext => {

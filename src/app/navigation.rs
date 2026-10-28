@@ -1496,12 +1496,18 @@ impl App {
         // Mirrors the content_area calculation in format_comment_lines:
         // indicator(1) + border_prefix(7) + safety_margin(2) = 10
         let content_area = viewport_width.saturating_sub(10);
-        let visual_lines: usize = comment
-            .content
-            .split('\n')
-            .map(|line| crate::ui::comment_panel::wrap_segments(line, content_area).len())
+        let visual_lines = |text: &str| -> usize {
+            text.split('\n')
+                .map(|line| crate::ui::comment_panel::wrap_segments(line, content_area).len())
+                .sum()
+        };
+        // Each reply adds its `├─ @author` divider plus its own segments.
+        let reply_lines: usize = comment
+            .replies
+            .iter()
+            .map(|reply| 1 + visual_lines(&reply.content))
             .sum();
-        2 + visual_lines // top border + visual segments + bottom border
+        2 + visual_lines(&comment.content) + reply_lines // top + body + replies + bottom
     }
 
     /// Update viewport_width and trigger annotation rebuild if it changed.

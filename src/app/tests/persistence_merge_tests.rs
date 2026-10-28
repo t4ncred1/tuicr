@@ -100,3 +100,101 @@ fn should_apply_external_edit_when_comment_is_unchanged_locally() {
         "new"
     );
 }
+
+fn push_reply(session: &mut ReviewSession, comment_id: &str, reply_id: &str, content: &str) {
+    let review = session.get_file_mut(&PathBuf::from("src/main.rs")).unwrap();
+    let comment = review
+        .file_comments
+        .iter_mut()
+        .find(|comment| comment.id == comment_id)
+        .unwrap();
+    let mut reply = crate::model::CommentReply::new(content.to_string(), "user");
+    reply.id = reply_id.to_string();
+    comment.replies.push(reply);
+}
+
+fn reply_ids(session: &ReviewSession) -> Vec<String> {
+    session.files[&PathBuf::from("src/main.rs")].file_comments[0]
+        .replies
+        .iter()
+        .map(|reply| reply.id.clone())
+        .collect()
+}
+
+#[test]
+fn should_keep_both_replies_when_local_and_external_answer_the_same_comment() {
+    let mut base = test_session();
+    push_file_comment(&mut base, "root", "question");
+    let mut current = base.clone();
+    let mut latest = base.clone();
+    push_reply(&mut current, "root", "local", "from tui");
+    push_reply(&mut latest, "root", "agent", "from claude");
+
+    let changed = App::merge_external_session_changes(&mut current, &base, &latest);
+
+    assert_eq!(changed, 1);
+    let mut ids = reply_ids(&current);
+    ids.sort();
+    assert_eq!(ids, vec!["agent", "local"]);
+}
+
+#[test]
+fn should_keep_external_reply_when_the_comment_was_edited_locally() {
+    let mut base = test_session();
+    push_file_comment(&mut base, "root", "question");
+    let mut current = base.clone();
+    let mut latest = base.clone();
+    current
+        .get_file_mut(&PathBuf::from("src/main.rs"))
+        .unwrap()
+        .file_comments[0]
+        .content = "edited".to_string();
+    push_reply(&mut latest, "root", "agent", "from claude");
+
+    App::merge_external_session_changes(&mut current, &base, &latest);
+
+    let comment = &current.files[&PathBuf::from("src/main.rs")].file_comments[0];
+    assert_eq!(comment.content, "edited");
+    assert_eq!(reply_ids(&current), vec!["agent"]);
+}
+
+#[test]
+fn should_apply_external_reply_deletion_but_keep_local_ones_deleted() {
+    let mut base = test_session();
+    push_file_comment(&mut base, "root", "question");
+    push_reply(&mut base, "root", "gone-externally", "a");
+    push_reply(&mut base, "root", "gone-locally", "b");
+    push_reply(&mut base, "root", "kept", "c");
+    let mut current = base.clone();
+    let mut latest = base.clone();
+    current
+        .get_file_mut(&PathBuf::from("src/main.rs"))
+        .unwrap()
+        .file_comments[0]
+        .replies
+        .retain(|reply| reply.id != "gone-locally");
+    latest
+        .get_file_mut(&PathBuf::from("src/main.rs"))
+        .unwrap()
+        .file_comments[0]
+        .replies
+        .retain(|reply| reply.id != "gone-externally");
+
+    let changed = App::merge_external_session_changes(&mut current, &base, &latest);
+
+    assert_eq!(changed, 1);
+    assert_eq!(reply_ids(&current), vec!["kept"]);
+}
+
+#[test]
+fn should_bring_in_replies_of_a_comment_added_externally() {
+    let base = test_session();
+    let mut current = base.clone();
+    let mut latest = base.clone();
+    push_file_comment(&mut latest, "root", "question");
+    push_reply(&mut latest, "root", "agent", "answer");
+
+    App::merge_external_session_changes(&mut current, &base, &latest);
+
+    assert_eq!(reply_ids(&current), vec!["agent"]);
+}

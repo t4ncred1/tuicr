@@ -23,6 +23,10 @@ struct ScriptedVcs {
     /// call order, so a test can tell a narrowed subrange fetch apart from a
     /// full-range one.
     commit_range_diff_ids: Arc<Mutex<Vec<Vec<String>>>>,
+    working_tree_with_commits_diff_results: RefCell<VecDeque<Result<Vec<DiffFile>>>>,
+    /// The commit ids each `get_working_tree_with_commits_diff` call was asked
+    /// for, in call order.
+    working_tree_with_commits_diff_ids: Arc<Mutex<Vec<Vec<String>>>>,
 }
 
 impl ScriptedVcs {
@@ -38,6 +42,8 @@ impl ScriptedVcs {
             grammar_counts: Arc::new(Mutex::new(Vec::new())),
             commit_range_diff_results: RefCell::new(VecDeque::new()),
             commit_range_diff_ids: Arc::new(Mutex::new(Vec::new())),
+            working_tree_with_commits_diff_results: RefCell::new(VecDeque::new()),
+            working_tree_with_commits_diff_ids: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -56,6 +62,20 @@ impl ScriptedVcs {
         self.commit_range_diff_results
             .borrow_mut()
             .push_back(result);
+    }
+
+    /// Queue one `get_working_tree_with_commits_diff` response. Same
+    /// FIFO/panic-past-the-end contract as `push_working_tree_diff`.
+    fn push_working_tree_with_commits_diff(&self, result: Result<Vec<DiffFile>>) {
+        self.working_tree_with_commits_diff_results
+            .borrow_mut()
+            .push_back(result);
+    }
+
+    /// A handle to the per-call commit ids seen by
+    /// `get_working_tree_with_commits_diff`, readable after the mock moves.
+    fn working_tree_with_commits_diff_ids(&self) -> Arc<Mutex<Vec<Vec<String>>>> {
+        Arc::clone(&self.working_tree_with_commits_diff_ids)
     }
 
     /// A handle to the call counter that stays readable after the mock has been
@@ -106,6 +126,23 @@ impl VcsBackend for ScriptedVcs {
             .borrow_mut()
             .pop_front()
             .expect("ScriptedVcs: get_commit_range_diff called more times than scripted")
+    }
+
+    fn get_working_tree_with_commits_diff(
+        &self,
+        commit_ids: &[String],
+        _highlighter: &SyntaxHighlighter,
+    ) -> Result<Vec<DiffFile>> {
+        self.working_tree_with_commits_diff_ids
+            .lock()
+            .expect("working tree with commits diff ids poisoned")
+            .push(commit_ids.to_vec());
+        self.working_tree_with_commits_diff_results
+            .borrow_mut()
+            .pop_front()
+            .expect(
+                "ScriptedVcs: get_working_tree_with_commits_diff called more times than scripted",
+            )
     }
 
     fn stage_file(&self, _path: &Path) -> Result<()> {
@@ -852,6 +889,42 @@ fn should_fetch_changed_diff_files_keeping_narrowed_commit_selection() {
             .as_slice(),
         [vec!["c3".to_string()]],
         "diff-watch's probe fetch must use the narrowed selection, not the full commit range"
+    );
+}
+
+/// Under `-w` the diff-watch tick fills the pane with recent history, so the
+/// user can select "Unstaged changes" plus commits. A reload must keep that
+/// combined selection instead of falling back to the working tree alone.
+#[test]
+fn should_reload_working_tree_review_keeping_selected_commits() {
+    let combined = vec![make_diff_file("c2.rs", FileStatus::Modified, 20)];
+    let vcs = ScriptedVcs::new();
+    vcs.push_working_tree_with_commits_diff(Ok(combined.clone()));
+    let commit_ids_seen = vcs.working_tree_with_commits_diff_ids();
+    let calls = vcs.call_counter();
+    let mut app = build_app_with_scripted_vcs(combined, vcs);
+    app.diff_source = DiffSource::StagedAndUnstaged;
+    app.review_commits = vec![
+        App::unstaged_commit_entry(),
+        make_commit_info("c2"),
+        make_commit_info("c1"),
+    ];
+    app.commit_selection_range = Some((0, 1));
+
+    app.reload_diff_files().expect("reload should succeed");
+
+    assert_eq!(
+        commit_ids_seen
+            .lock()
+            .expect("commit ids poisoned")
+            .as_slice(),
+        [vec!["c2".to_string()]],
+        "reload must fetch the working tree plus the selected commit"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "reload must not fall back to the working tree alone"
     );
 }
 

@@ -87,6 +87,9 @@ pub enum SlugSource {
     Commits(CommitRange),
     WorktreeAndCommits(CommitRange),
     StagedUnstagedAndCommits(CommitRange),
+    /// Branch review. Carries no commit token: the session follows the
+    /// branch as it gains commits.
+    Branch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -152,6 +155,7 @@ impl fmt::Display for SlugSource {
             SlugSource::StagedAndUnstaged(head) => write!(f, "staged-and-unstaged/{head}"),
             SlugSource::File(identity) => write!(f, "file/{identity}"),
             SlugSource::Pristine => f.write_str("pristine"),
+            SlugSource::Branch => f.write_str("branch"),
             SlugSource::Commits(r) => write!(f, "commits/{}..{}", r.base, r.head),
             SlugSource::WorktreeAndCommits(r) => {
                 write!(f, "worktree-and-commits/{}..{}", r.base, r.head)
@@ -293,6 +297,9 @@ fn parse_source(s: &str) -> Result<SlugSource, SlugParseError> {
     }
     if s == "pristine" {
         return Ok(SlugSource::Pristine);
+    }
+    if s == "branch" {
+        return Ok(SlugSource::Branch);
     }
     if let Some(identity) = s.strip_prefix("file/") {
         return live_source(identity, s, SlugSource::File);
@@ -576,6 +583,7 @@ fn build_source(
         SessionDiffSource::StagedAndUnstaged => Ok(SlugSource::StagedAndUnstaged(live_head())),
         SessionDiffSource::File => Ok(SlugSource::File(head_commit.to_string())),
         SessionDiffSource::Pristine => Ok(SlugSource::Pristine),
+        SessionDiffSource::Branch => Ok(SlugSource::Branch),
         SessionDiffSource::CommitRange => {
             Ok(SlugSource::Commits(range_from(commit_range, diff_source)?))
         }
@@ -698,6 +706,7 @@ mod tests {
         assert_roundtrip("agavra/tuicr@main/unstaged/abc1234");
         assert_roundtrip("agavra/tuicr@feature-login/staged-and-unstaged/abc1234");
         assert_roundtrip("agavra/tuicr@main/pristine");
+        assert_roundtrip("agavra/tuicr@feature-login/branch");
         assert_roundtrip("agavra/tuicr@~abc1234/worktree/abc1234");
         assert_roundtrip("agavra/tuicr@main/commits/abc1234..def5678");
         assert_roundtrip("agavra/tuicr@main/worktree-and-commits/abc1234..def5678");

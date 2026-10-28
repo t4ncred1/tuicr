@@ -39,6 +39,8 @@ mouse = true
 mouse_scroll_lines = 3
 leader = ","
 editor = "nvim"
+send_command = "tuicr-to-agent"
+send_clears_comments = true
 comment_vim = false
 q_quits = false
 comment_tab_width = 4
@@ -106,6 +108,8 @@ session_header = true
 | `mouse_scroll_lines`       | `3`          | Lines scrolled per mouse wheel tick in the diff, file list, comment list, help, and summary views; the commit list moves its cursor this many rows. Must be between 1 and 100; other values are ignored with a startup warning. |
 | `leader`                   | `;`          | Single-character prefix for panel focus, sidebar toggles, and review-comment shortcuts. Invalid multi-character values are ignored with a startup warning. |
 | `editor`                   | `$EDITOR`    | Editor command for the `e` / `:edit` handoff, split with shell-like quoting rules (e.g. `"code -w"`). Falls back to `$EDITOR`, then `vi`. |
+| `send_command`             | unset        | Command `:send` pipes the review markdown into (stdin), split with shell-like quoting rules and run without a shell. It runs synchronously, so it should hand the text off and exit. `:send` warns when unset. |
+| `send_clears_comments`     | `false`      | Clear comments (keeping reviewed marks) after `send_command` exits successfully, so the next `:send` carries only new feedback. |
 | `comment_vim`              | `false`      | Vim modal editing in the comment box; toggle at runtime with `:vim`. When off, default emacs/readline bindings.                                            |
 | `q_quits`                  | `false`      | Restore bare `q` as a quit key in review modes. `:q`, `ZZ`, and `ZQ` work regardless of this setting.                                                     |
 | `comment_tab_width`        | `4`          | Spaces inserted by Tab while typing in the vim comment box (Insert mode).                                                                                  |
@@ -253,6 +257,25 @@ Comment categories control:
 | `label`      | no       | Visible tag in the UI, export, and submitted comments (`[QUESTION]`, `[NITPICK]`). Defaults to `id` uppercased. |
 | `definition` | no       | Guidance text for LLMs, included in the exported `Comment types:` legend.               |
 | `color`      | no       | Comment badge / border color. Terminal name (`yellow`, `light_red`) or hex (`#RRGGBB`). |
+| `forge`      | no       | `true` marks a type meant for the forge. See [Forge-only types](#forge-only-types). Defaults to `false`. |
+
+### Forge-only types
+
+A type with `forge = true` is meant for the pull request. It is offered in the Tab cycle only
+while reviewing a PR or MR, and its comments are posted without the `[TYPE]` tag. As soon as any
+configured type sets `forge`, `:submit` posts **only** the `forge` types: every other comment,
+untyped ones included, stays a local draft. Without any `forge` type, `:submit` posts every
+comment as before.
+
+```toml
+comment_types = [
+  { id = "claude", definition = "for the coding agent; never posted" },
+  { id = "pr", label = "PR", color = "green", forge = true },
+]
+```
+
+Here `claude` stays the default everywhere, `pr` appears only in PR reviews and is what `:submit`
+sends, and untyped comments are private notes.
 
 ### Defaults
 

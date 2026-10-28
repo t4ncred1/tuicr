@@ -103,6 +103,10 @@ pub enum SessionDiffSource {
     /// `base_commit` for these sessions starts with `"pristine:"` so the
     /// reload path can match by prefix instead of exact HEAD.
     Pristine,
+    /// `--branch` review: the branch's commits since it forked plus the
+    /// working tree. Keyed by branch alone, so the session survives new
+    /// commits; the commit list is resolved again on every reload.
+    Branch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,6 +282,43 @@ impl ReviewSession {
                     }
                     return true;
                 }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn comment_mut(&mut self, location: &CommentLocation) -> Option<&mut Comment> {
+        match location {
+            CommentLocation::Review { index } => self.review_comments.get_mut(*index),
+            CommentLocation::File { path, index } => {
+                self.get_file_mut(path)?.file_comments.get_mut(*index)
+            }
+            CommentLocation::Line {
+                path, line, index, ..
+            } => self
+                .get_file_mut(path)?
+                .line_comments
+                .get_mut(line)?
+                .get_mut(*index),
+        }
+    }
+
+    /// Remove the reply with `reply_id` from whichever comment holds it.
+    /// Replies are local-only, so a locked comment's replies stay removable.
+    pub(crate) fn remove_reply(&mut self, reply_id: &str) -> bool {
+        let comments = self
+            .review_comments
+            .iter_mut()
+            .chain(self.files.values_mut().flat_map(|review| {
+                review
+                    .file_comments
+                    .iter_mut()
+                    .chain(review.line_comments.values_mut().flatten())
+            }));
+        for comment in comments {
+            if let Some(index) = comment.replies.iter().position(|r| r.id == reply_id) {
+                comment.replies.remove(index);
+                return true;
             }
         }
         false

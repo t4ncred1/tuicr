@@ -192,6 +192,33 @@ pub struct Comment {
     /// comments are always shown.
     #[serde(default)]
     pub commit_id: Option<String>,
+    /// Answers to this comment, oldest first. Replies live inside their
+    /// comment rather than beside it, so every loop over a file's comments
+    /// (forge submit, counts, navigation) sees only the comment itself. They
+    /// are local-only and never posted to a forge.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replies: Vec<CommentReply>,
+}
+
+/// One answer in a comment's thread. Carries no anchor or type of its own:
+/// it inherits both from the comment it answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommentReply {
+    pub id: String,
+    pub content: String,
+    pub author: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl CommentReply {
+    pub fn new(content: String, author: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            content,
+            author: author.into(),
+            created_at: Utc::now(),
+        }
+    }
 }
 
 impl Comment {
@@ -209,6 +236,7 @@ impl Comment {
             remote_review_id: None,
             remote_comment_id: None,
             commit_id: None,
+            replies: Vec::new(),
         }
     }
 
@@ -232,6 +260,7 @@ impl Comment {
             remote_review_id: None,
             remote_comment_id: None,
             commit_id: None,
+            replies: Vec::new(),
         }
     }
 

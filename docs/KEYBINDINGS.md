@@ -159,9 +159,17 @@ Shown below the file tree when local comments or visible remote PR threads exist
 | `dd` | Delete comment at cursor |
 | `i` | Edit comment at cursor (vim: text cursor at start) |
 | `A` | Edit comment at cursor with text cursor at end (vim mode only) |
+| `a` | Reply to the comment at cursor |
 | `e` | Open focused file in `$EDITOR` |
 | `y` | Copy review to clipboard |
 | `Y` | Copy the comment at cursor to clipboard |
+
+`a` answers the comment under the cursor. Replies render inside the comment's
+box, each under an `@author` divider, and while you type the box shows the
+thread so far above your reply. Replies are local-only: `:clip` and `:send`
+export them, but `:submit` never posts them, so you can also reply to a comment
+already pushed to a forge. Agents reply the same way with
+`tuicr review add --reply-to <id>`.
 
 `e` opens the file at the cursor's line. Terminal editors (`vim`, `nvim`, `nano`, …)
 take over the screen and tuicr reloads the diff once they exit. Windowed editors
@@ -229,6 +237,7 @@ In command mode,
 | `:e` (`:reload`) | Reload diff files |
 | `:edit` | Open focused file in `$EDITOR` |
 | `:clip` (`:export`) | Copy review to clipboard |
+| `:send` | Pipe review to the configured `send_command` (e.g. a script that hands it to your agent) |
 | `:copy-url` | Copy the open PR URL to clipboard (PR mode) |
 | `:summary` | Show all pending local-draft comments; `j`/`k` select and `Enter` jumps |
 | `:diff` | Toggle diff view (unified / side-by-side) |

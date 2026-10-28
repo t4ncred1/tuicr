@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::CommentReply;
 
 impl App {
     /// Slug for the currently active session, derived from the session's
@@ -282,6 +283,13 @@ impl App {
             }
         }
 
+        // Replies merge by reply id in their own pass below, so a comment
+        // compares equal on both sides when only its thread moved. Otherwise a
+        // local reply and an agent's reply to the same comment would be an
+        // edit conflict, and "local wins" would drop the agent's reply.
+        let base_replies = Self::collect_replies(base);
+        let current_replies = Self::collect_replies(current);
+        let latest_replies = Self::collect_replies(latest);
         let base_comments = Self::collect_stored_comments(base);
         let current_comments = Self::collect_stored_comments(current);
         let latest_comments = Self::collect_stored_comments(latest);
@@ -323,7 +331,65 @@ impl App {
             }
         }
 
+        changed + Self::merge_replies(current, &base_replies, &current_replies, &latest_replies)
+    }
+
+    /// Rebuilds every surviving comment's thread from the three sides: the
+    /// local thread, minus replies deleted externally, plus replies added
+    /// externally. A reply deleted locally stays deleted.
+    fn merge_replies(
+        current: &mut ReviewSession,
+        base: &HashMap<String, Vec<CommentReply>>,
+        local: &HashMap<String, Vec<CommentReply>>,
+        latest: &HashMap<String, Vec<CommentReply>>,
+    ) -> usize {
+        let empty = Vec::new();
+        let mut changed = 0;
+        for comment_id in Self::collect_replies(current).into_keys() {
+            let base = base.get(&comment_id).unwrap_or(&empty);
+            let local = local.get(&comment_id).unwrap_or(&empty);
+            let latest = latest.get(&comment_id).unwrap_or(&empty);
+            let known = |replies: &[CommentReply], id: &str| replies.iter().any(|r| r.id == id);
+
+            let mut merged: Vec<CommentReply> = local
+                .iter()
+                .filter(|r| !known(base, &r.id) || known(latest, &r.id))
+                .cloned()
+                .collect();
+            let added: Vec<CommentReply> = latest
+                .iter()
+                .filter(|r| !known(base, &r.id) && !known(local, &r.id))
+                .cloned()
+                .collect();
+            let removed = local.len() - merged.len();
+            changed += removed + added.len();
+            merged.extend(added);
+            merged.sort_by_key(|r| r.created_at);
+
+            if let Some(location) = current.find_comment_by_id(&comment_id)
+                && let Some(comment) = current.comment_mut(&location)
+            {
+                comment.replies = merged;
+            }
+        }
         changed
+    }
+
+    /// Every comment's replies keyed by comment id, including comments with
+    /// none, so `merge_replies` visits each surviving comment.
+    fn collect_replies(session: &ReviewSession) -> HashMap<String, Vec<CommentReply>> {
+        let file_comments = session.files.values().flat_map(|review| {
+            review
+                .file_comments
+                .iter()
+                .chain(review.line_comments.values().flatten())
+        });
+        session
+            .review_comments
+            .iter()
+            .chain(file_comments)
+            .map(|comment| (comment.id.clone(), comment.replies.clone()))
+            .collect()
     }
 
     fn comment_count(session: &ReviewSession) -> usize {
@@ -342,7 +408,7 @@ impl App {
                 comment.id.clone(),
                 StoredComment {
                     location: StoredCommentLocation::Review,
-                    comment: comment.clone(),
+                    comment: Self::without_replies(comment),
                 },
             );
         }
@@ -353,7 +419,7 @@ impl App {
                     comment.id.clone(),
                     StoredComment {
                         location: StoredCommentLocation::File { path: path.clone() },
-                        comment: comment.clone(),
+                        comment: Self::without_replies(comment),
                     },
                 );
             }
@@ -367,7 +433,7 @@ impl App {
                                 path: path.clone(),
                                 line: *line,
                             },
-                            comment: comment.clone(),
+                            comment: Self::without_replies(comment),
                         },
                     );
                 }
@@ -375,6 +441,13 @@ impl App {
         }
 
         comments
+    }
+
+    fn without_replies(comment: &Comment) -> Comment {
+        Comment {
+            replies: Vec::new(),
+            ..comment.clone()
+        }
     }
 
     fn upsert_stored_comment(session: &mut ReviewSession, stored: StoredComment) {

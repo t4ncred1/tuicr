@@ -10,7 +10,9 @@ use crate::cli::{LineSideArg, ReviewCommand};
 use crate::config;
 use crate::error::{Result, TuicrError};
 use crate::model::comment::{self, CommentLifecycleState};
-use crate::model::{ClearScope, Comment, CommentType, LineRange, LineSide, ReviewSession};
+use crate::model::{
+    ClearScope, Comment, CommentReply, CommentType, LineRange, LineSide, ReviewSession,
+};
 use crate::persistence::storage;
 use crate::review_store::{
     AddCommentRequest, CommentTarget, ReviewStore, SessionRef, SessionSummary,
@@ -27,6 +29,14 @@ fn run_with_writer(command: ReviewCommand, out: &mut impl Write) -> Result<()> {
         ReviewCommand::List { repo, all } => list_sessions(&repo, all, out),
         ReviewCommand::Add {
             session,
+            repo,
+            reply_to: Some(comment_id),
+            username,
+            content,
+            ..
+        } => add_reply(&session, &repo, &comment_id, username, content, out),
+        ReviewCommand::Add {
+            session,
             input,
             repo,
             comment_type,
@@ -34,6 +44,7 @@ fn run_with_writer(command: ReviewCommand, out: &mut impl Write) -> Result<()> {
             line,
             end_line,
             side,
+            reply_to: None,
             username,
             content,
         } => add_comment(
@@ -160,6 +171,30 @@ fn add_comment(
         },
     )?;
     let output = CommentOutput::from_target(&target, &comment);
+    serde_json::to_writer_pretty(&mut *out, &output)?;
+    writeln!(out)?;
+    Ok(())
+}
+
+fn add_reply(
+    session: &str,
+    repo: &Path,
+    comment_id: &str,
+    username: Option<String>,
+    content: Option<String>,
+    out: &mut impl Write,
+) -> Result<()> {
+    let store = ReviewStore::new();
+    let session_ref = resolve_session_ref(&store, repo, session)?;
+    // clap requires COMMENT unless --input is given, and --input conflicts
+    // with --reply-to, so the text is always present here.
+    let content = content.unwrap_or_default();
+    let config = config::load_config()
+        .ok()
+        .and_then(|outcome| outcome.config);
+    let author = resolve_cli_author(username, config.as_ref());
+    let reply = store.add_reply(&session_ref, comment_id, content, author)?;
+    let output = ReplyOutput::new(comment_id, &reply);
     serde_json::to_writer_pretty(&mut *out, &output)?;
     writeln!(out)?;
     Ok(())
@@ -640,6 +675,32 @@ struct CommentOutput {
     lifecycle_state: &'static str,
     created_at: String,
     content: String,
+    /// Answers to this comment, oldest first. Omitted when there are none,
+    /// so the shape of an unanswered comment is unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    replies: Vec<ReplyOutput>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReplyOutput {
+    id: String,
+    /// The comment this reply answers.
+    comment_id: String,
+    author: String,
+    created_at: String,
+    content: String,
+}
+
+impl ReplyOutput {
+    fn new(comment_id: &str, reply: &CommentReply) -> Self {
+        Self {
+            id: reply.id.clone(),
+            comment_id: comment_id.to_string(),
+            author: reply.author.clone(),
+            created_at: reply.created_at.to_rfc3339(),
+            content: reply.content.clone(),
+        }
+    }
 }
 
 impl CommentOutput {
@@ -690,6 +751,11 @@ impl CommentOutput {
             lifecycle_state: lifecycle_id(comment.lifecycle_state),
             created_at: comment.created_at.to_rfc3339(),
             content: comment.content.clone(),
+            replies: comment
+                .replies
+                .iter()
+                .map(|reply| ReplyOutput::new(&comment.id, reply))
+                .collect(),
         }
     }
 }

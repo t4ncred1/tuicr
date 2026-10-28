@@ -23,7 +23,8 @@ pub(super) fn render_comment_navigator(
         .title(title)
         .borders(Borders::ALL)
         .style(styles::panel_style(&app.theme))
-        .border_style(styles::border_style(&app.theme, focused));
+        .border_style(styles::border_style(&app.theme, focused))
+        .border_type(styles::pane_border_type(focused));
 
     let inner = block.inner(area);
     app.comment_navigator_inner_area = Some(inner);

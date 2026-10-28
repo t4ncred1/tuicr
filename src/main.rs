@@ -101,8 +101,12 @@ fn main() -> anyhow::Result<()> {
         false
     };
 
-    // --path implies --working-tree unless -r is explicitly provided
-    if cli_args.path_filter.is_some() && !cli_args.working_tree && cli_args.revisions.is_none() {
+    // --path implies --working-tree unless -r or --branch is explicitly provided
+    if cli_args.path_filter.is_some()
+        && !cli_args.working_tree
+        && cli_args.revisions.is_none()
+        && cli_args.branch.is_none()
+    {
         cli_args.working_tree = true;
     }
     let mut startup_warnings = Vec::new();
@@ -239,6 +243,7 @@ fn main() -> anyhow::Result<()> {
             AppStartupOptions {
                 revisions: cli_args.revisions.as_deref(),
                 working_tree: cli_args.working_tree,
+                branch: cli_args.branch.as_ref().map(Option::as_deref),
                 path_filter: cli_args.path_filter.as_deref(),
                 file_path: cli_args.file_path.as_deref(),
                 all_files: cli_args.all_files,
@@ -274,6 +279,8 @@ fn main() -> anyhow::Result<()> {
                 app.comment_vim_enabled = cfg.comment_vim.unwrap_or(false);
                 app.q_quits = cfg.q_quits.unwrap_or(false);
                 app.editor_override = cfg.editor.clone();
+                app.send_command = cfg.send_command.clone();
+                app.send_clears_comments = cfg.send_clears_comments.unwrap_or(false);
                 if let Some(w) = cfg.comment_tab_width {
                     app.comment_tab_width = w;
                 }

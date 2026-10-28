@@ -79,6 +79,7 @@ tuicr                       # Pick from a commit selector
 tuicr tui                   # Same TUI, explicit subcommand
 tuicr -w                    # Uncommitted changes (skip selector)
 tuicr -r main..HEAD         # Commit range
+tuicr --branch              # The branch's commits since it forked + uncommitted
 tuicr --file f.md --line 42 # Annotate a file, starting at line 42
 tuicr pr 125                # GitHub, Gitea, Bitbucket, or Azure DevOps PR, or Gerrit change
 tuicr pr 125 --remote up    # Use a named Git remote's fetch URL
@@ -206,6 +207,21 @@ Paste it back to any coding agent (Claude, Codex, Cursor, etc).
 For an agent-driven workflow where your agent opens tuicr in a cmux, tmux, Zellij, or
 Herdr split pane, see [skills/tuicr/SKILL.md](skills/tuicr/SKILL.md).
 
+To skip the paste, set `send_command` in your [config](docs/CONFIG.md) and run `:send`: tuicr
+pipes the same markdown into that command's stdin, without leaving the review. For example, a
+script that pastes it into the agent's tmux pane:
+
+```bash
+#!/bin/sh
+# ~/.local/bin/tuicr-to-agent: send_command = "tuicr-to-agent"
+tmux load-buffer -b tuicr - &&
+  tmux paste-buffer -p -d -b tuicr -t "${AGENT_PANE:-agent}" &&
+  tmux send-keys -t "${AGENT_PANE:-agent}" Enter
+```
+
+With `send_clears_comments = true`, sent comments are cleared (reviewed marks stay), so the next
+`:send` carries only new feedback. Reload with `:e` to review the agent's changes.
+
 ### To stdout
 
 Run with `--stdout` to pipe the markdown to another process:
@@ -218,7 +234,8 @@ tuicr --stdout | pbcopy
 ## Review session CLI
 
 `tuicr review` exposes saved sessions without opening the TUI. It can list
-sessions, add, delete, and clear comments, and print stored comments for
+sessions, add, delete, and clear comments, reply to them (`--reply-to`), and
+print stored comments for
 agent and script
 integrations. See [docs/REVIEW_CLI.md](docs/REVIEW_CLI.md).
 
@@ -316,6 +333,7 @@ A first-session cheatsheet. Press `?` inside tuicr for the full reference.
 | `i` / `e` (file tree) | Filter files in / out by regex; narrows the tree **and** the diff |
 | `I` / `E` (file tree) | Clear the include / exclude filter |
 | `c` / `C` | Add line / file comment |
+| `a` | Reply to the comment at cursor (local-only, never posted to a forge) |
 | `v` / `V` | Visual mode (range comment) |
 | `r` | Toggle file reviewed |
 | `R` | Toggle hunk reviewed |

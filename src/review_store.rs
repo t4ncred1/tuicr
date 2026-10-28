@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::error::{Result, TuicrError};
-use crate::model::{ClearScope, Comment, CommentType, LineRange, LineSide, ReviewSession};
+use crate::model::{
+    ClearScope, Comment, CommentReply, CommentType, LineRange, LineSide, ReviewSession,
+};
 use crate::persistence::manifest::{ManifestEntry, ManifestKind};
 use crate::persistence::storage;
 pub use crate::persistence::storage::DeleteOutcome;
@@ -84,13 +86,29 @@ impl ReviewStore {
         Ok(comment)
     }
 
-    /// Delete one comment by id from a persisted session.
+    /// Answer an existing comment in a persisted session and save it.
+    pub fn add_reply(
+        &self,
+        session_ref: &SessionRef,
+        comment_id: &str,
+        content: String,
+        author: String,
+    ) -> Result<CommentReply> {
+        let reviews_dir = self.reviews_dir()?;
+        let (_session, reply) =
+            storage::update_session_in_dir(session_ref.path(), &reviews_dir, |session| {
+                add_reply_to_session(session, comment_id, content, author)
+            })?;
+        Ok(reply)
+    }
+
+    /// Delete one comment or reply by id from a persisted session.
     pub fn delete_comment(&self, session_ref: &SessionRef, comment_id: &str) -> Result<bool> {
         let reviews_dir = self.reviews_dir()?;
         let (_session, removed) =
             storage::update_session_in_dir(session_ref.path(), &reviews_dir, |session| {
                 let Some(location) = session.find_comment_by_id(comment_id) else {
-                    return Ok(false);
+                    return Ok(session.remove_reply(comment_id));
                 };
                 if session.remove_comment(&location) {
                     Ok(true)
@@ -315,6 +333,35 @@ pub fn add_comment_to_session(
     Ok(comment)
 }
 
+/// Shared reply insertion used by `ReviewStore::add_reply` and the TUI.
+///
+/// Replies are allowed on locked comments: they are local-only and never
+/// posted to a forge, so a submitted comment can still carry a conversation.
+pub fn add_reply_to_session(
+    session: &mut ReviewSession,
+    comment_id: &str,
+    content: String,
+    author: String,
+) -> Result<CommentReply> {
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err(TuicrError::InvalidInput(
+            "reply cannot be empty".to_string(),
+        ));
+    }
+    let location = session
+        .find_comment_by_id(comment_id)
+        .ok_or_else(|| TuicrError::InvalidInput(format!("no comment with id {comment_id}")))?;
+    let reply = CommentReply::new(content, author);
+    session
+        .comment_mut(&location)
+        .expect("find_comment_by_id returned a live location")
+        .replies
+        .push(reply.clone());
+    session.updated_at = Utc::now();
+    Ok(reply)
+}
+
 fn file_review_mut<'a>(
     session: &'a mut ReviewSession,
     path: &Path,
@@ -340,6 +387,58 @@ mod tests {
         );
         session.add_file(PathBuf::from("src/main.rs"), FileStatus::Modified, 0);
         session
+    }
+
+    #[test]
+    fn should_add_and_delete_a_reply_through_store() {
+        let temp = tempdir().unwrap();
+        let store = ReviewStore::with_reviews_dir(temp.path().join("reviews"));
+        let mut session = test_session(PathBuf::from("/repo"));
+        let comment = Comment::new("why?".to_string(), CommentType::from_id("note"), None);
+        let comment_id = comment.id.clone();
+        session.review_comments.push(comment);
+        let session_ref = store.save_review(&session).unwrap();
+
+        let reply = store
+            .add_reply(
+                &session_ref,
+                &comment_id,
+                " because ".to_string(),
+                "Claude".to_string(),
+            )
+            .unwrap();
+        let saved = store.get_review(&session_ref).unwrap();
+
+        assert_eq!(saved.review_comments[0].replies, vec![reply.clone()]);
+        assert_eq!(reply.content, "because");
+        assert_eq!(reply.author, "Claude");
+        assert!(store.delete_comment(&session_ref, &reply.id).unwrap());
+        let saved = store.get_review(&session_ref).unwrap();
+        assert!(saved.review_comments[0].replies.is_empty());
+        assert_eq!(saved.review_comments.len(), 1);
+    }
+
+    #[test]
+    fn should_reject_a_reply_to_an_unknown_comment() {
+        let mut session = test_session(PathBuf::from("/repo"));
+
+        let result = add_reply_to_session(
+            &mut session,
+            "missing",
+            "hi".to_string(),
+            "user".to_string(),
+        );
+
+        assert!(matches!(result, Err(TuicrError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn should_omit_empty_replies_from_session_json() {
+        let comment = Comment::new("x".to_string(), CommentType::from_id("note"), None);
+
+        let json = serde_json::to_string(&comment).unwrap();
+
+        assert!(!json.contains("replies"), "{json}");
     }
 
     #[test]

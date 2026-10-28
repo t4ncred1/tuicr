@@ -18,7 +18,9 @@ use crate::model::{
     LineRange, LineSide, ReviewSession, SessionDiffSource,
 };
 use crate::persistence::load_latest_session_for_context;
-use crate::review_store::{AddCommentRequest, CommentTarget, add_comment_to_session};
+use crate::review_store::{
+    AddCommentRequest, CommentTarget, add_comment_to_session, add_reply_to_session,
+};
 use crate::syntax::SyntaxHighlighter;
 use crate::theme::Theme;
 use crate::update::UpdateInfo;
@@ -1168,6 +1170,10 @@ pub struct App {
     pub diff_source: DiffSource,
     pub pending_editor_target: Option<EditorTarget>,
     pub editor_override: Option<String>,
+    /// Command that `:send` pipes the review markdown into.
+    pub send_command: Option<String>,
+    /// Clear comments (keeping reviewed marks) after a successful `:send`.
+    pub send_clears_comments: bool,
     /// Windowed editors that have not exited yet; polled by
     /// `poll_editor_launches`.
     pub(crate) editor_launches: Vec<EditorLaunch>,
@@ -1230,6 +1236,12 @@ pub struct App {
     pub comment_is_file_level: bool,
     pub comment_line: Option<(u32, LineSide)>,
     pub editing_comment_id: Option<String>,
+    /// The comment input is answering `editing_comment_id` rather than
+    /// editing it: saving appends a reply instead of replacing the content.
+    pub replying_to_comment: bool,
+
+    /// Set for a `--branch` review: reloads resolve the branch's commits again.
+    pub branch_review: Option<BranchReview>,
 
     pub visual_selection: Option<VisualSelection>,
     /// True once the active mouse drag has actually moved off the press cell.
@@ -1497,6 +1509,9 @@ pub struct CommentTypeDefinition {
     pub label: String,
     pub definition: Option<String>,
     pub color: Option<Color>,
+    /// Meant for the forge: offered only in PR reviews, and once any type
+    /// sets it, the only types `:submit` posts.
+    pub forge: bool,
 }
 
 #[derive(Default)]
@@ -1875,6 +1890,9 @@ impl Default for VcsOpenOptions {
 pub struct AppStartupOptions<'a> {
     pub revisions: Option<&'a str>,
     pub working_tree: bool,
+    /// `--branch`: `Some(None)` finds the fork point, `Some(Some(base))`
+    /// forks from `base`.
+    pub branch: Option<Option<&'a str>>,
     pub path_filter: Option<&'a str>,
     pub file_path: Option<&'a str>,
     /// Whole-repo annotation mode (`--all-files`). Mutually exclusive with
@@ -1911,6 +1929,7 @@ impl AppStartupOptions<'_> {
 }
 
 mod annotations;
+mod branch;
 mod coloring;
 mod comment_vim;
 mod comments;
@@ -1931,6 +1950,8 @@ mod submit;
 mod theme_picker;
 mod tree;
 mod visual;
+
+pub use branch::BranchReview;
 
 #[cfg(test)]
 mod tests;

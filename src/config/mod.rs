@@ -70,6 +70,9 @@ pub struct CommentTypeConfig {
     pub label: Option<String>,
     pub definition: Option<String>,
     pub color: Option<String>,
+    /// Comments of this type are meant for the forge: offered only in PR
+    /// reviews, and once any type sets it, the only ones `:submit` posts.
+    pub forge: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -221,6 +224,12 @@ pub struct AppConfig {
     pub comment_tab_width: Option<usize>,
     pub leader: Option<char>,
     pub editor: Option<String>,
+    /// Command `:send` pipes the review markdown into, split with shell-like
+    /// quoting rules. `:send` is disabled when unset.
+    pub send_command: Option<String>,
+    /// Clear comments (keeping reviewed marks) after a successful `:send`.
+    /// Defaults to false.
+    pub send_clears_comments: Option<bool>,
     pub transparent_background: Option<bool>,
     pub scroll_offset: Option<usize>,
     pub review_watch_interval_ms: Option<usize>,
@@ -293,6 +302,8 @@ const KNOWN_KEYS: &[&str] = &[
     "comment_tab_width",
     "leader",
     "editor",
+    "send_command",
+    "send_clears_comments",
     "transparent_background",
     "scroll_offset",
     "review_watch_interval_ms",
@@ -658,6 +669,8 @@ fn load_config_from_path(path: &Path) -> Result<ConfigLoadOutcome> {
         comment_tab_width: read_usize(table, "comment_tab_width", &mut warnings),
         leader: read_leader(table, &mut warnings),
         editor: read_string(table, "editor", &mut warnings),
+        send_command: read_string(table, "send_command", &mut warnings),
+        send_clears_comments: read_bool(table, "send_clears_comments", &mut warnings),
         transparent_background: read_bool(table, "transparent_background", &mut warnings),
         scroll_offset: read_usize(table, "scroll_offset", &mut warnings),
         review_watch_interval_ms: read_usize(table, "review_watch_interval_ms", &mut warnings),
@@ -814,7 +827,7 @@ fn parse_comment_types(
         };
 
         for key in entry.keys() {
-            if key != "id" && key != "label" && key != "definition" && key != "color" {
+            if !["id", "label", "definition", "color", "forge"].contains(&key.as_str()) {
                 warnings.push(format!(
                     "Warning: Unknown key 'comment_types[{index}].{key}', ignoring"
                 ));
@@ -874,12 +887,23 @@ fn parse_comment_types(
             },
         };
 
+        let forge = match entry.get("forge") {
+            None => false,
+            Some(raw) => raw.as_bool().unwrap_or_else(|| {
+                warnings.push(format!(
+                    "Warning: Config key 'comment_types[{index}].forge' must be true or false; ignoring value"
+                ));
+                false
+            }),
+        };
+
         seen_ids.insert(id.clone());
         parsed.push(CommentTypeConfig {
             id,
             label,
             definition,
             color,
+            forge,
         });
     }
 
@@ -1887,6 +1911,36 @@ mod tests {
         );
     }
 
+    // send_command / send_clears_comments
+
+    #[test]
+    fn should_parse_send_command_and_clear_flag() {
+        let outcome = parse_config(
+            "send_command = \"tuicr-to-agent --pane 1\"\nsend_clears_comments = true\n",
+        );
+        let cfg = outcome.config.as_ref().expect("config should parse");
+        assert_eq!(cfg.send_command.as_deref(), Some("tuicr-to-agent --pane 1"));
+        assert_eq!(cfg.send_clears_comments, Some(true));
+        assert!(outcome.warnings.is_empty());
+    }
+
+    #[test]
+    fn should_warn_and_ignore_send_command_with_invalid_type() {
+        let outcome = parse_config("send_command = true\n");
+        assert_eq!(
+            outcome
+                .config
+                .as_ref()
+                .and_then(|cfg| cfg.send_command.clone()),
+            None
+        );
+        assert_eq!(outcome.warnings.len(), 1);
+        assert_eq!(
+            outcome.warnings[0],
+            "Warning: Config key 'send_command' must be a string; ignoring value"
+        );
+    }
+
     // no_update_check
 
     #[test]
@@ -2243,6 +2297,28 @@ comment_type_prefix = "yes"
         assert_eq!(comment_types[0].id, "note");
         assert_eq!(comment_types[0].color, None);
         assert_eq!(outcome.warnings.len(), 1);
+    }
+
+    #[test]
+    fn should_parse_comment_type_forge_flag() {
+        let outcome = parse_config(
+            r#"comment_types = [
+  { id = "claude" },
+  { id = "pr", forge = true },
+  { id = "odd", forge = "yes" }
+]"#,
+        );
+        let comment_types = outcome
+            .config
+            .as_ref()
+            .and_then(|cfg| cfg.comment_types.as_ref())
+            .expect("comment types should be set");
+
+        assert!(!comment_types[0].forge);
+        assert!(comment_types[1].forge);
+        assert!(!comment_types[2].forge);
+        assert_eq!(outcome.warnings.len(), 1, "{:?}", outcome.warnings);
+        assert!(outcome.warnings[0].contains("forge"));
     }
 
     // export

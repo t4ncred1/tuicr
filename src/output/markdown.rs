@@ -11,7 +11,8 @@ use crate::error::{Result, TuicrError};
 use crate::forge::remote_comments::{
     PrCommentsVisibility, RemoteReviewThread, filter_threads, group_threads_by_path,
 };
-use crate::model::{CommentType, LineRange, LineSide, ReviewSession};
+use crate::model::{CommentReply, CommentType, LineRange, LineSide, ReviewSession};
+use crate::process::{CommandOutputErrorKind, run_command_output_with_stdin};
 use crate::slug::short_sha;
 /// (file_path, line_range, side, comment_type, content, commit_id)
 type CommentEntry<'a> = (
@@ -21,6 +22,7 @@ type CommentEntry<'a> = (
     String,
     &'a str,
     Option<&'a str>,
+    &'a [CommentReply],
 );
 
 /// Generate markdown content from the review session.
@@ -73,6 +75,37 @@ pub fn export_to_clipboard(
     } else {
         "Review copied to clipboard".to_string()
     })
+}
+
+/// Pipe review markdown into the configured `send_command` (`:send`).
+///
+/// The command is split with shell-like quoting rules and executed directly
+/// without a shell, like the `editor` setting. It runs synchronously, so it
+/// should hand the text off and return quickly. Returns the program's file
+/// name for the status bar.
+pub fn send_to_command(command: &str, content: &str) -> Result<String> {
+    let mut parts = shlex::split(command)
+        .filter(|parts| !parts.is_empty())
+        .ok_or_else(|| TuicrError::Send(format!("invalid send_command: {command}")))?;
+    let program = parts.remove(0);
+    run_command_output_with_stdin(&program, None, &parts, content).map_err(|err| {
+        let detail = match err.kind {
+            CommandOutputErrorKind::NotFound => "command not found".to_string(),
+            CommandOutputErrorKind::SpawnFailed => err.stderr,
+            CommandOutputErrorKind::Unsuccessful => match (err.status, err.stderr.trim()) {
+                (Some(code), "") => format!("exited with status {code}"),
+                (Some(code), stderr) => format!("exited with status {code}: {stderr}"),
+                (None, "") => "terminated by signal".to_string(),
+                (None, stderr) => format!("terminated by signal: {stderr}"),
+            },
+        };
+        TuicrError::Send(format!("{program}: {detail}"))
+    })?;
+    let name = std::path::Path::new(&program)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or(program);
+    Ok(name)
 }
 
 /// Copy arbitrary text to the system clipboard. Returns `Ok(true)` if the
@@ -362,6 +395,7 @@ fn generate_markdown(
             export_comment_type_label(&comment.comment_type, comment_types),
             &comment.content,
             None,
+            &comment.replies,
         ));
     }
 
@@ -381,6 +415,7 @@ fn generate_markdown(
                 export_comment_type_label(&comment.comment_type, comment_types),
                 &comment.content,
                 comment.commit_id.as_deref(),
+                &comment.replies,
             ));
         }
 
@@ -401,6 +436,7 @@ fn generate_markdown(
                     export_comment_type_label(&comment.comment_type, comment_types),
                     &comment.content,
                     comment.commit_id.as_deref(),
+                    &comment.replies,
                 ));
             }
         }
@@ -417,7 +453,7 @@ fn generate_markdown(
         }
         local_section_written = true;
     }
-    for (i, (file, line_range, side, comment_type, content, commit_id)) in
+    for (i, (file, line_range, side, comment_type, content, commit_id, replies)) in
         all_comments.iter().enumerate()
     {
         let number = i + 1;
@@ -461,6 +497,15 @@ fn generate_markdown(
         );
         for line in content_lines {
             let _ = writeln!(md, "{continuation_indent}{line}");
+        }
+        // Same `- @author - body` shape as remote thread replies below.
+        for reply in replies.iter() {
+            let mut reply_lines = reply.content.split('\n').map(|l| l.trim_end_matches('\r'));
+            let first = reply_lines.next().unwrap_or_default();
+            let _ = writeln!(md, "{continuation_indent}- @{} - {first}", reply.author);
+            for line in reply_lines {
+                let _ = writeln!(md, "{continuation_indent}  {line}");
+            }
         }
     }
 
@@ -797,24 +842,28 @@ mod tests {
                 label: "note".to_string(),
                 definition: Some("observations".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "suggestion".to_string(),
                 label: "suggestion".to_string(),
                 definition: Some("improvements".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "issue".to_string(),
                 label: "issue".to_string(),
                 definition: Some("problems to fix".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "praise".to_string(),
                 label: "praise".to_string(),
                 definition: Some("positive feedback".to_string()),
                 color: None,
+                forge: false,
             },
         ]
     }
@@ -1021,6 +1070,7 @@ mod tests {
             label: "question".to_string(),
             definition: Some("ask for clarification".to_string()),
             color: None,
+            forge: false,
         }];
 
         let markdown = generate_markdown(
@@ -1157,6 +1207,35 @@ mod tests {
 
         assert!(markdown
             .contains("`Review Comment (scope: working tree changes)` - Please split this into smaller commits"));
+    }
+
+    #[test]
+    fn should_export_replies_under_their_comment() {
+        let mut session = create_test_session();
+        let mut comment = Comment::new(
+            "Why a Vec here?".to_string(),
+            CommentType::from_id("note"),
+            None,
+        );
+        comment.replies = vec![crate::model::CommentReply::new(
+            "Order matters.\nSee the caller.".to_string(),
+            "Claude",
+        )];
+        session.review_comments.push(comment);
+
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &comment_types(),
+            &ExportConfig::default(),
+            &[],
+            None,
+        );
+
+        assert!(
+            markdown.contains("   - @Claude - Order matters.\n     See the caller.\n"),
+            "{markdown}"
+        );
     }
 
     #[test]
@@ -1705,6 +1784,7 @@ mod tests {
             label: CommentType::NONE_ID.to_string(),
             definition: None,
             color: None,
+            forge: false,
         }];
         let markdown = generate_markdown(
             &session,
@@ -1914,12 +1994,14 @@ mod tests {
                 label: "question".to_string(),
                 definition: Some("ask for clarification".to_string()),
                 color: None,
+                forge: false,
             },
             CommentTypeDefinition {
                 id: "issue".to_string(),
                 label: "issue".to_string(),
                 definition: Some("problems to fix".to_string()),
                 color: None,
+                forge: false,
             },
         ];
 
@@ -1934,5 +2016,54 @@ mod tests {
 
         assert!(markdown.contains("Comment types: QUESTION (ask for clarification)"));
         assert!(!markdown.contains("ISSUE"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn should_pipe_review_into_send_command() {
+        // given
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("review.md");
+        let command = format!("sh -c 'cat > \"$0\"' {}", out.display());
+
+        // when
+        let result = send_to_command(&command, "1. `src/lib.rs:3` - Fix this\n");
+
+        // then
+        assert_eq!(result.unwrap(), "sh");
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            "1. `src/lib.rs:3` - Fix this\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn should_report_send_command_exit_status_and_stderr() {
+        let result = send_to_command("sh -c 'echo no agent pane >&2; exit 3'", "review");
+
+        let message = result.unwrap_err().to_string();
+        assert_eq!(
+            message,
+            "Send failed: sh: exited with status 3: no agent pane"
+        );
+    }
+
+    #[test]
+    fn should_report_missing_send_command_program() {
+        let result = send_to_command("tuicr-no-such-send-program", "review");
+
+        let message = result.unwrap_err().to_string();
+        assert_eq!(
+            message,
+            "Send failed: tuicr-no-such-send-program: command not found"
+        );
+    }
+
+    #[test]
+    fn should_reject_unparsable_send_command() {
+        let result = send_to_command("sh -c 'unterminated", "review");
+
+        assert!(matches!(result, Err(TuicrError::Send(_))));
     }
 }

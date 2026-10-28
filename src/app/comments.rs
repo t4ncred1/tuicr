@@ -951,6 +951,31 @@ impl App {
         false
     }
 
+    /// Start a reply to the comment under the cursor. It reuses the edit
+    /// lookup for the comment's location, then clears the buffer so the
+    /// input composes a new reply. Returns false when no comment is there.
+    pub fn enter_reply_mode(&mut self) -> bool {
+        if !self.enter_edit_mode(true) {
+            return false;
+        }
+        self.replying_to_comment = true;
+        self.comment_buffer.clear();
+        self.comment_cursor = 0;
+        true
+    }
+
+    /// What the inline input box for `comment` is composing.
+    pub fn comment_input_kind<'a>(
+        &self,
+        comment: &'a Comment,
+    ) -> crate::ui::comment_panel::CommentInputKind<'a> {
+        if self.replying_to_comment {
+            crate::ui::comment_panel::CommentInputKind::Reply(comment)
+        } else {
+            crate::ui::comment_panel::CommentInputKind::Edit
+        }
+    }
+
     pub fn enter_comment_mode(&mut self, file_level: bool, line: Option<(u32, LineSide)>) {
         self.input_mode = InputMode::Comment;
         if self.diff_view_mode != DiffViewMode::SideBySide {
@@ -987,6 +1012,7 @@ impl App {
         self.comment_vim_pending = CommentVimPending::None;
         self.comment_is_review_level = false;
         self.editing_comment_id = None;
+        self.replying_to_comment = false;
         self.comment_line_range = None;
     }
 
@@ -1001,8 +1027,20 @@ impl App {
         let mut message = "Error: Could not save comment".to_string();
         let mut autosave_error = None;
 
+        if self.replying_to_comment
+            && let Some(comment_id) = &self.editing_comment_id
+        {
+            message = match add_reply_to_session(
+                &mut self.session,
+                comment_id,
+                content,
+                self.username.clone(),
+            ) {
+                Ok(_) => "Reply added".to_string(),
+                Err(e) => format!("Error: Could not save reply: {e}"),
+            };
         // Check if we're editing an existing comment
-        if let Some(editing_id) = &self.editing_comment_id {
+        } else if let Some(editing_id) = &self.editing_comment_id {
             if let Some(comment) = self
                 .session
                 .review_comments
@@ -1113,47 +1151,45 @@ impl App {
     }
 
     pub fn cycle_comment_type(&mut self) {
-        if self.comment_types.is_empty() {
-            return;
-        }
-        if self.comment_types.len() == 1 {
-            self.set_message("Only one comment type configured");
-            return;
-        }
-
-        let current_id = self.comment_type.id().to_string();
-        let current_index = self
-            .comment_types
-            .iter()
-            .position(|comment_type| comment_type.id == current_id)
-            .unwrap_or(0);
-        let next_index = (current_index + 1) % self.comment_types.len();
-        let next_id = self.comment_types[next_index].id.clone();
-        self.comment_type = CommentType::from_id(&next_id);
-        self.announce_comment_type();
+        self.step_comment_type(true);
     }
 
     pub fn cycle_comment_type_reverse(&mut self) {
-        if self.comment_types.is_empty() {
-            return;
-        }
-        if self.comment_types.len() == 1 {
-            self.set_message("Only one comment type configured");
-            return;
+        self.step_comment_type(false);
+    }
+
+    /// The comment types Tab offers here: `forge` types only in PR reviews,
+    /// where there is a forge to post them to.
+    pub(in crate::app) fn offered_comment_types(&self) -> Vec<&CommentTypeDefinition> {
+        let pr_review = self.is_pull_request_review();
+        self.comment_types
+            .iter()
+            .filter(|comment_type| pr_review || !comment_type.forge)
+            .collect()
+    }
+
+    fn step_comment_type(&mut self, forward: bool) {
+        let offered = self.offered_comment_types();
+        match offered.len() {
+            0 => return,
+            1 => {
+                self.set_message("Only one comment type configured");
+                return;
+            }
+            _ => {}
         }
 
         let current_id = self.comment_type.id();
-        let current_index = self
-            .comment_types
+        let current_index = offered
             .iter()
             .position(|comment_type| comment_type.id == current_id)
             .unwrap_or(0);
-        let prev_index = if current_index == 0 {
-            self.comment_types.len() - 1
+        let next_index = if forward {
+            (current_index + 1) % offered.len()
         } else {
-            current_index - 1
+            (current_index + offered.len() - 1) % offered.len()
         };
-        self.comment_type = CommentType::from_id(&self.comment_types[prev_index].id);
+        self.comment_type = CommentType::from_id(&offered[next_index].id);
         self.announce_comment_type();
     }
 
