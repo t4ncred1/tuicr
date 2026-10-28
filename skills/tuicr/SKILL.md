@@ -296,14 +296,24 @@ saves and quits every tuicr tab open for that repository. It never forces a
 tab: one with a comment being typed or an editor open is reported as
 `left open <label>: <reason>` and stays, for the user to finish.
 
-Then run `tuicr-watch.sh` (in this skill directory) as a long-running
-background monitor whose output lines reach you as notifications — in Claude
-Code, the `Monitor` tool. Use the maximum timeout and start it with `--reset`
-when you begin watching, so every thread already open is reported once:
+Then run `tuicr-watch.sh` (in this skill directory) with `--once` as a
+background command that notifies you when it exits (in Claude Code, Bash with
+`run_in_background`). It waits silently until a thread opens, prints every
+thread open at that moment, and exits, so waiting costs nothing while the
+user is quiet. Start it with `--reset` when you begin watching, so every
+thread already open is reported once:
 
 ```bash
-<skill-directory>/tuicr-watch.sh --reset "$PWD"
+<skill-directory>/tuicr-watch.sh --reset --once "$PWD"
 ```
+
+After answering the threads it reported, start it again **without**
+`--reset`: the watcher remembers what it reported, so only new activity comes
+through, and nothing that arrived in between is missed. Prefer this to a
+long-running monitor (Claude Code's `Monitor` tool): a monitor times out
+after at most 30 minutes, and every re-arm wakes you for nothing. Without
+`--once` the watcher runs forever and prints each event as it happens, for
+tools that stream output.
 
 When you move to another worktree, stop the watcher and start it again with
 `--reset` for the new directory.
@@ -325,6 +335,9 @@ review and a PR review can be open side by side).
 - `tuicr: error: <message>` — the watcher has stopped; fix the cause and
   start it again.
 
+With `--once`, the output you get on exit starts with the `watching session`
+line, so every batch names the session to answer in.
+
 Handle each open thread like a user comment (ISSUE first), then answer it with
 `--reply-to <id>` as above. Your reply closes the thread, so it is not
 reported again until the user responds. Pass `--username` matching
@@ -336,10 +349,8 @@ example `claude`) when the user keeps some comments to themselves: threads of
 other types are never reported, and untyped comments count as type `none`.
 Treat those threads as private when you read the session directly too.
 
-When the monitor expires, start it again **without** `--reset`: the watcher
-remembers what it reported, so only new activity comes through. It stays
-silent while no tuicr session is open, and picks a session up as soon as one
-starts. Stop it when the user is done reviewing.
+The watcher stays silent while no tuicr session is open, and picks a session
+up as soon as one starts. Stop it when the user is done reviewing.
 
 ## Legacy Export Output
 

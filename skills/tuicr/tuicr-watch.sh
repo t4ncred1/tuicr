@@ -10,9 +10,15 @@
 # key is the thread id plus its last entry's id and content, so a new user
 # reply or an edited comment is reported again, and nothing else is.
 #
-# Usage: tuicr-watch.sh [--reset] [--session <slug>] [directory]
+# Usage: tuicr-watch.sh [--reset] [--once] [--session <slug>] [directory]
 #   --reset    forget what was already reported, so every open thread is
 #              printed again (use when a fresh agent session starts watching)
+#   --once     exit after the first poll that reports a thread, printing every
+#              thread open at that moment. An agent runs it as a background
+#              command, which wakes it only on exit and never times out, so
+#              watching costs nothing while the user is quiet; it starts the
+#              watcher again after answering. Nothing is missed in between:
+#              unreported threads are printed on the next start.
 #   --session  watch exactly this session, e.g. a PR review's
 #              `gh:owner/repo/pr/N`; without it the watcher follows the
 #              repository's most recently written active local session
@@ -47,10 +53,12 @@ WATCH_TYPES="${TUICR_WATCH_TYPES:-}"
 STATE_DIR="${TUICR_WATCH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/tuicr/watch}"
 
 reset=false
+once=false
 session=""
 while (($# > 0)); do
   case "$1" in
     --reset) reset=true ;;
+    --once) once=true ;;
     --session)
       session="${2:-}"
       shift
@@ -116,6 +124,7 @@ while true; do
       printf 'tuicr: watching session %s\n' "$slug"
     fi
 
+    reported=0
     if comments=$("$TUICR_BIN" review comments --repo "$repo_root" --session "$slug" 2>/dev/null); then
       while IFS= read -r thread; do
         [[ -n "$thread" ]] || continue
@@ -124,9 +133,13 @@ while true; do
         printf '%s\n' "$(printf '%s' "$thread" | "$JQ_BIN" -r '.line')"
         # Recorded after printing: a crash in between re-reports, never drops.
         printf '%s\n' "$key" >>"$state_file"
+        reported=$((reported + 1))
       done < <(printf '%s' "$comments" |
         "$JQ_BIN" -c --arg agent "$AGENT_NAME" --arg types "$WATCH_TYPES" \
           "$open_threads_filter" 2>/dev/null)
+    fi
+    if $once && ((reported > 0)); then
+      exit 0
     fi
   fi
 
