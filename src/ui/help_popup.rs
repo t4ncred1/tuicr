@@ -546,7 +546,7 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
                 "  r         ",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::raw("Toggle file reviewed"),
+            Span::raw("Toggle file reviewed (on a tree directory: every shown file under it)"),
         ]),
         Line::from(vec![
             Span::styled(

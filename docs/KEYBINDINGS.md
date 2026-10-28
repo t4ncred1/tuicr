@@ -71,6 +71,7 @@ Press `?` to open help.
 | `E` | Clear the exclude filter |
 | `/` | Search file paths (substring) |
 | `n` / `N` | Next / previous file-path match |
+| `r` on a directory | Mark every shown file under it reviewed, or unmark them if all already are |
 | `<leader>r` | Mark every shown file reviewed, or unmark them if all already are (`:toggle-all`) |
 
 These keys are only active while the file tree is focused — in the diff, `i` still
@@ -103,7 +104,8 @@ them. `:toggle-all` (`<leader>r` in the file tree) unmarks the shown files when
 all of them are already reviewed, and marks them otherwise. "Shown" means after
 the `i`/`e` filters and `:set noreviewed`, so a filter scopes the change: `i`
 `^docs/` then `:mark-all` marks only the docs. Files a filter hides are never
-touched.
+touched. `r` on a directory row does the same for the shown files under that
+directory.
 
 ### Hiding reviewed files
 

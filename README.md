@@ -336,7 +336,7 @@ A first-session cheatsheet. Press `?` inside tuicr for the full reference.
 | `c` / `C` | Add line / file comment |
 | `a` | Reply to the comment at cursor (local-only, never posted to a forge), or answer the forge thread at cursor |
 | `v` / `V` | Visual mode (range comment) |
-| `r` | Toggle file reviewed |
+| `r` | Toggle file reviewed (on a file-tree directory: every shown file under it) |
 | `:mark-all` / `:unmark-all` / `:toggle-all` | Mark / unmark / toggle every file the tree shows (after filters) reviewed; `<leader>r` in the file tree is `:toggle-all` |
 | `R` | Toggle hunk reviewed |
 | `e` | Open focused file in `$EDITOR` (in PR review: the PR's revision, as a read-only copy when the checkout differs) |

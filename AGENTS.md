@@ -175,6 +175,9 @@ Repository-managed agent integrations:
   `toggle_reviewed_for_file_idx` calls `advance_past_hidden_file()` to land on the next
   visible file (wrapping, then parking at the overview once the queue empties). It runs
   regardless of the `adjust_cursor` argument — the tree selection has to move either way.
+- Bulk review (`:mark-all`/`:unmark-all`/`:toggle-all`, `<leader>r` in the tree, `r` on a
+  directory row) goes through `App::review_shown_files`, which only touches
+  `filtered_file_indices()`: a filter scopes the change, and a hidden file is never marked.
 - `file_filter.draft` makes the tree a text-input sub-state of `InputMode::Normal`, the same
   shape as `pr_filter_draft` for the target selector; `main.rs` routes to
   `map_file_tree_prompt_mode` while it is `Some`

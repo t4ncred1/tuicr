@@ -774,3 +774,59 @@ fn should_park_at_the_overview_when_mark_all_hides_every_file() {
     assert_eq!(app.diff_state.current_file_idx, 0);
     assert_eq!(app.diff_state.cursor_line, 0);
 }
+
+/// Tree row index of the directory row for `dir`.
+fn dir_row(app: &App, dir: &str) -> usize {
+    app.build_visible_items()
+        .iter()
+        .position(|item| matches!(item, FileTreeItem::Directory { path, .. } if path == dir))
+        .unwrap_or_else(|| panic!("no directory row for {dir}"))
+}
+
+#[test]
+fn should_mark_every_file_under_a_directory_row_with_r() {
+    let mut app = app_with(&["src/a.rs", "src/inner/b.rs", "srcfoo/c.rs", "docs/guide.md"]);
+    app.file_list_state.select(dir_row(&app, "src"));
+
+    crate::handler::handle_file_list_action(&mut app, Action::ToggleReviewed);
+
+    assert_eq!(reviewed_paths(&app), vec!["src/a.rs", "src/inner/b.rs"]);
+}
+
+#[test]
+fn should_unmark_a_directory_whose_files_are_all_reviewed_with_r() {
+    let mut app = app_with(&["src/a.rs", "src/b.rs", "docs/guide.md"]);
+    mark_reviewed(&mut app, "src/a.rs");
+    mark_reviewed(&mut app, "src/b.rs");
+    mark_reviewed(&mut app, "docs/guide.md");
+    app.file_list_state.select(dir_row(&app, "src"));
+
+    crate::handler::handle_file_list_action(&mut app, Action::ToggleReviewed);
+
+    assert_eq!(reviewed_paths(&app), vec!["docs/guide.md"]);
+}
+
+#[test]
+fn should_skip_files_the_filter_hides_when_marking_a_directory() {
+    let mut app = app_with(&["src/a.rs", "src/a_test.rs"]);
+    apply(&mut app, FileTreePrompt::Exclude, "_test");
+    app.file_list_state.select(dir_row(&app, "src"));
+
+    crate::handler::handle_file_list_action(&mut app, Action::ToggleReviewed);
+
+    assert_eq!(reviewed_paths(&app), vec!["src/a.rs"]);
+}
+
+#[test]
+fn should_keep_the_tree_selection_in_range_when_marking_hides_a_directory() {
+    let mut app = app_with(&["docs/guide.md", "src/a.rs", "src/b.rs"]);
+    app.set_show_reviewed(false);
+    let row = dir_row(&app, "src");
+    app.file_list_state.select(row);
+
+    crate::handler::handle_file_list_action(&mut app, Action::ToggleReviewed);
+
+    assert_eq!(visible_paths(&app), vec!["docs/guide.md"]);
+    let rows = app.build_visible_items().len();
+    assert!(app.file_list_state.selected() < rows);
+}

@@ -369,10 +369,28 @@ impl App {
     /// `:toggle-all`). Files a filter hides are never touched, so narrowing
     /// the tree first scopes the change.
     pub fn review_visible_files(&mut self, bulk: BulkReview) {
+        self.review_shown_files(bulk, None);
+    }
+
+    /// `r` on a directory row: toggle every shown file under `dir`, which
+    /// `:toggle-all` would toggle had the filter narrowed to that directory.
+    pub fn toggle_reviewed_for_directory(&mut self, dir: &str) {
+        let selected = self.file_list_state.selected();
+        self.review_shown_files(BulkReview::Toggle, Some(Path::new(dir)));
+        // With reviewed files hidden, marking removes the directory row: keep
+        // the selection where it was, on the row that slid into its place.
+        let rows = self.build_visible_items().len();
+        if rows > 0 && self.file_list_state.selected() == selected {
+            self.file_list_state.select(selected.min(rows - 1));
+        }
+    }
+
+    fn review_shown_files(&mut self, bulk: BulkReview, under: Option<&Path>) {
         let paths: Vec<_> = self
             .filtered_file_indices()
             .into_iter()
             .map(|idx| self.diff_files[idx].display_path().clone())
+            .filter(|path| under.is_none_or(|dir| path.starts_with(dir)))
             .collect();
         if paths.is_empty() {
             self.set_warning("No files shown");
