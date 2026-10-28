@@ -2,8 +2,8 @@ use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
 
 use crate::app::{
-    self, App, CommandCompletionState, ExpandDirection, FileTreeItem, FileTreePrompt, FocusedPanel,
-    GapCursorHit, InputMode, TargetTab, VisualSelection,
+    self, App, BulkReview, CommandCompletionState, ExpandDirection, FileTreeItem, FileTreePrompt,
+    FocusedPanel, GapCursorHit, InputMode, TargetTab, VisualSelection,
 };
 use crate::forge::remote_comments::PrCommentsVisibility;
 use crate::forge::submit::SubmitEvent;
@@ -74,6 +74,9 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec::new(&["diff"], CommandKind::Diff),
     CommandSpec::new(&["focus", "f"], CommandKind::Focus),
     CommandSpec::new(&["stage"], CommandKind::Stage),
+    CommandSpec::new(&["mark-all"], CommandKind::ReviewAll(BulkReview::Mark)),
+    CommandSpec::new(&["unmark-all"], CommandKind::ReviewAll(BulkReview::Unmark)),
+    CommandSpec::new(&["toggle-all"], CommandKind::ReviewAll(BulkReview::Toggle)),
     CommandSpec::new(
         &["commits", "targets"],
         CommandKind::Targets(TargetTab::Local),
@@ -165,6 +168,7 @@ enum CommandKind {
     Diff,
     Focus,
     Stage,
+    ReviewAll(BulkReview),
     Targets(TargetTab),
     SubmitPicker,
     Submit(SubmitEvent),
@@ -1041,6 +1045,10 @@ fn dispatch_command(app: &mut App, kind: CommandKind) -> CommandAfterDispatch {
         }
         CommandKind::Stage => {
             app.stage_reviewed_files();
+            CommandAfterDispatch::ExitCommandMode
+        }
+        CommandKind::ReviewAll(bulk) => {
+            app.review_visible_files(bulk);
             CommandAfterDispatch::ExitCommandMode
         }
         CommandKind::Targets(tab) => {

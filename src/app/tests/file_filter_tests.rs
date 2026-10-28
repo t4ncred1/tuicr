@@ -693,3 +693,84 @@ fn should_not_hide_a_file_whose_hunks_are_merely_all_hunk_reviewed() {
 
     assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs"]);
 }
+
+fn reviewed_paths(app: &App) -> Vec<String> {
+    let mut paths: Vec<_> = app
+        .diff_files
+        .iter()
+        .map(|file| file.display_path().clone())
+        .filter(|path| app.session.is_file_reviewed(path))
+        .map(|path| path.display().to_string())
+        .collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn should_mark_only_the_files_the_filter_shows_via_mark_all() {
+    let mut app = app_with(&["src/a.rs", "src/b.rs", "docs/guide.md"]);
+    apply(&mut app, FileTreePrompt::Include, "^src/");
+
+    run_command(&mut app, "mark-all");
+
+    assert_eq!(reviewed_paths(&app), vec!["src/a.rs", "src/b.rs"]);
+    assert!(app.dirty);
+}
+
+#[test]
+fn should_unmark_only_the_files_the_filter_shows_via_unmark_all() {
+    let mut app = app_with(&["src/a.rs", "docs/guide.md"]);
+    mark_reviewed(&mut app, "src/a.rs");
+    mark_reviewed(&mut app, "docs/guide.md");
+    apply(&mut app, FileTreePrompt::Exclude, "^docs/");
+
+    run_command(&mut app, "unmark-all");
+
+    assert_eq!(reviewed_paths(&app), vec!["docs/guide.md"]);
+}
+
+#[test]
+fn should_mark_all_shown_files_via_toggle_all_while_any_is_unreviewed() {
+    let mut app = app_with(&["a.rs", "b.rs"]);
+    mark_reviewed(&mut app, "a.rs");
+
+    run_command(&mut app, "toggle-all");
+
+    assert_eq!(reviewed_paths(&app), vec!["a.rs", "b.rs"]);
+}
+
+#[test]
+fn should_unmark_all_shown_files_via_toggle_all_once_all_are_reviewed() {
+    let mut app = app_with(&["a.rs", "b.rs"]);
+    mark_reviewed(&mut app, "a.rs");
+    mark_reviewed(&mut app, "b.rs");
+
+    run_command(&mut app, "toggle-all");
+
+    assert!(reviewed_paths(&app).is_empty());
+}
+
+#[test]
+fn should_leave_reviewed_state_alone_when_mark_all_has_nothing_to_change() {
+    let mut app = app_with(&["a.rs"]);
+    mark_reviewed(&mut app, "a.rs");
+    app.dirty = false;
+
+    run_command(&mut app, "mark-all");
+
+    assert_eq!(reviewed_paths(&app), vec!["a.rs"]);
+    assert!(!app.dirty);
+}
+
+#[test]
+fn should_park_at_the_overview_when_mark_all_hides_every_file() {
+    let mut app = app_with(&["a.rs", "b.rs"]);
+    app.set_show_reviewed(false);
+    app.jump_to_file(index_of(&app, "b.rs"));
+
+    run_command(&mut app, "mark-all");
+
+    assert!(visible_paths(&app).is_empty());
+    assert_eq!(app.diff_state.current_file_idx, 0);
+    assert_eq!(app.diff_state.cursor_line, 0);
+}

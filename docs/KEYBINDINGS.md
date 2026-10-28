@@ -71,6 +71,7 @@ Press `?` to open help.
 | `E` | Clear the exclude filter |
 | `/` | Search file paths (substring) |
 | `n` / `N` | Next / previous file-path match |
+| `<leader>r` | Mark every shown file reviewed, or unmark them if all already are (`:toggle-all`) |
 
 These keys are only active while the file tree is focused — in the diff, `i` still
 edits the comment at the cursor and `/` still searches the diff.
@@ -94,6 +95,15 @@ filters are a view, not an edit.
 
 Filters are session-local: they are not written to the review session and reset
 when tuicr restarts, but they survive a `:e` reload.
+
+### Marking many files reviewed
+
+`:mark-all` marks every file the tree shows as reviewed, and `:unmark-all` clears
+them. `:toggle-all` (`<leader>r` in the file tree) unmarks the shown files when
+all of them are already reviewed, and marks them otherwise. "Shown" means after
+the `i`/`e` filters and `:set noreviewed`, so a filter scopes the change: `i`
+`^docs/` then `:mark-all` marks only the docs. Files a filter hides are never
+touched.
 
 ### Hiding reviewed files
 
@@ -268,6 +278,8 @@ In command mode,
 | `:theme <name>` | Apply and save `<name>` directly, without opening the picker |
 | `:focus` (`:f`) | Toggle single-file view |
 | `:stage` | Stage reviewed files (unstaged diffs only) |
+| `:mark-all` / `:unmark-all` | Mark / unmark every file the tree shows reviewed |
+| `:toggle-all` | Unmark the shown files if all are reviewed, otherwise mark them (`<leader>r` in the file tree) |
 | `:vim` (`:set vim!`) / `:novim` (`:set novim`) / `:set vim` | Toggle / disable / enable vim modal editing in the comment box (overrides `comment_vim`) |
 | `:commits` (`:targets`) | Select commits to review |
 | `:prs` | Open the review target selector on Pull Requests |

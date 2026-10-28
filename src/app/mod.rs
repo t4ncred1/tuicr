@@ -1970,6 +1970,7 @@ mod tree;
 mod visual;
 
 pub use branch::BranchReview;
+pub use reviewed::BulkReview;
 
 #[cfg(test)]
 mod tests;

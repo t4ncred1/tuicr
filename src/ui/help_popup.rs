@@ -495,6 +495,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
             ),
             Span::raw("Search file paths; n/N step matches (selection only)"),
         ]),
+        Line::from(vec![
+            Span::styled(
+                format!("  {leader}r        "),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Mark the shown files reviewed, or unmark them if all are (:toggle-all)"),
+        ]),
         Line::from(Span::raw(
             "  Patterns are case-insensitive and match the whole relative path.",
         )),
@@ -773,6 +780,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("Stage reviewed files"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  :mark-all ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Mark every file the tree shows reviewed (:unmark-all, :toggle-all)"),
         ]),
         Line::from(vec![
             Span::styled(

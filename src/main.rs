@@ -714,6 +714,13 @@ fn main() -> anyhow::Result<()> {
                                 app.relative_line_numbers = !app.relative_line_numbers;
                                 continue;
                             }
+                            // `<leader>r` is `:toggle-all`, from the file tree only.
+                            crossterm::event::KeyCode::Char('r')
+                                if app.focused_panel == FocusedPanel::FileList =>
+                            {
+                                app.review_visible_files(app::BulkReview::Toggle);
+                                continue;
+                            }
                             _ => {}
                         }
                         // Otherwise fall through to normal handling

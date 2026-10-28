@@ -5,6 +5,15 @@ use crate::forge::traits::ForgeFileLinesRequest;
 use super::editor_target::{materialize, short_sha, snapshot_path, snapshot_root};
 use super::*;
 
+/// What a bulk review command does to the files the tree shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulkReview {
+    Mark,
+    Unmark,
+    /// Unmark when every shown file is already reviewed, otherwise mark.
+    Toggle,
+}
+
 /// The parts of a `DiffFile` that editor-target resolution needs.
 ///
 /// Copied out before resolving so the `&mut self` message setters stay usable
@@ -353,6 +362,56 @@ impl App {
                 self.diff_state.cursor_line = header_line;
                 self.ensure_cursor_visible();
             }
+        }
+    }
+
+    /// Mark or unmark every file the tree shows (`:mark-all`, `:unmark-all`,
+    /// `:toggle-all`). Files a filter hides are never touched, so narrowing
+    /// the tree first scopes the change.
+    pub fn review_visible_files(&mut self, bulk: BulkReview) {
+        let paths: Vec<_> = self
+            .filtered_file_indices()
+            .into_iter()
+            .map(|idx| self.diff_files[idx].display_path().clone())
+            .collect();
+        if paths.is_empty() {
+            self.set_warning("No files shown");
+            return;
+        }
+        let reviewed = match bulk {
+            BulkReview::Mark => true,
+            BulkReview::Unmark => false,
+            BulkReview::Toggle => !paths.iter().all(|path| self.session.is_file_reviewed(path)),
+        };
+
+        let mut changed = 0;
+        for path in &paths {
+            if let Some(review) = self.session.get_file_mut(path)
+                && review.reviewed != reviewed
+            {
+                review.reviewed = reviewed;
+                changed += 1;
+            }
+        }
+        if changed == 0 {
+            let state = if reviewed { "reviewed" } else { "unreviewed" };
+            self.set_message(format!("All {} shown file(s) already {state}", paths.len()));
+            return;
+        }
+
+        self.revealed_reviewed_file = None;
+        self.dirty = true;
+        self.rebuild_annotations();
+        self.set_message(if reviewed {
+            format!("Marked {changed} file(s) reviewed")
+        } else {
+            format!("Unmarked {changed} file(s)")
+        });
+        // Marking can hide the rows when reviewed files are hidden, the one
+        // under the cursor included.
+        let current = self.diff_state.current_file_idx;
+        if !self.file_idx_passes_filter(current) {
+            self.advance_past_hidden_file(current);
         }
     }
 
