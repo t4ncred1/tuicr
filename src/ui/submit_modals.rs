@@ -166,6 +166,20 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
         )));
     }
     lines.push(Line::from(format!("Inline: {n}", n = state.mappable.len())));
+    // Your pending review on the forge is finished by this submit (a draft
+    // adds to it), so say what is already in it.
+    let pending = app.pending_review_comment_count();
+    if pending > 0 {
+        let what = if matches!(state.event, SubmitEvent::Draft) {
+            "new comments are added to it"
+        } else {
+            "published with this review"
+        };
+        lines.push(Line::from(format!(
+            "Pending review: {pending} comment{s}, {what}",
+            s = plural(pending)
+        )));
+    }
     // Only when there are some, so reviews without them keep their layout.
     if !state.thread_replies.is_empty() {
         lines.push(Line::from(format!(

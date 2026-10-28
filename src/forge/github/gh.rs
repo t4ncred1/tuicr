@@ -564,6 +564,9 @@ where
         pr: &PullRequestDetails,
         request: CreateReviewRequest<'_>,
     ) -> Result<GhCreateReviewResponse> {
+        if let Some(pending) = self.find_pending_review(pr)? {
+            return self.extend_pending_review(pr, &request, &pending);
+        }
         if !request.thread_replies.is_empty() {
             return self.create_review_with_thread_replies(pr, &request);
         }
@@ -575,6 +578,27 @@ where
         );
         let output = self.post_json(pr, reviews_endpoint(pr), "POST", &payload)?;
         parse_create_review_response(&output)
+    }
+
+    /// Deleting a pending review through REST leaves its comments behind:
+    /// orphaned, still `PENDING`, and still returned by the threads query. So
+    /// the comments go first, then the review. Deleting the last comment can
+    /// take the review with it, so a review that is already gone by then
+    /// counts as discarded.
+    fn discard_pending_review(&self, pr: &PullRequestDetails) -> Result<bool> {
+        let Some(pending) = self.find_pending_review(pr)? else {
+            return Ok(false);
+        };
+        for comment_id in &pending.comment_ids {
+            self.delete_review_comment(pr, comment_id)?;
+        }
+        match self.delete_pending_review(pr, pending.id) {
+            Ok(()) => Ok(true),
+            Err(error) => match self.find_pending_review(pr)? {
+                None => Ok(true),
+                Some(_) => Err(error),
+            },
+        }
     }
 }
 
@@ -676,8 +700,8 @@ where
         pr: &PullRequestDetails,
         review_node_id: &str,
         reply: &ThreadReplyPost,
-    ) -> Result<()> {
-        let mut args = vec![
+    ) -> Result<String> {
+        let args = vec![
             "api".to_string(),
             "graphql".to_string(),
             "-f".to_string(),
@@ -689,11 +713,197 @@ where
             "-f".to_string(),
             format!("body={}", reply.body),
         ];
+        let output = self.run_graphql(pr, args)?;
+        created_comment_id(
+            &output,
+            &["addPullRequestReviewThreadReply", "comment", "id"],
+        )
+    }
+
+    /// Runs a `gh api graphql` call built in `args`, routed to the PR's host.
+    fn run_graphql(&self, pr: &PullRequestDetails, mut args: Vec<String>) -> Result<String> {
         if pr.repository.host != DEFAULT_GITHUB_HOST {
             args.push("--hostname".to_string());
             args.push(pr.repository.host.clone());
         }
-        self.run_gh(args, &pr.repository.host).map(|_| ())
+        self.run_gh(args, &pr.repository.host)
+    }
+
+    /// The viewer's pending review on `pr`, if they have one. GitHub allows
+    /// one per person and shows it to its author only, so the first pending
+    /// review the viewer can see is theirs.
+    fn find_pending_review(&self, pr: &PullRequestDetails) -> Result<Option<PendingReview>> {
+        let args = self.build_graphql_args(pr, PENDING_REVIEW_QUERY, None);
+        let output = self.run_gh(args, &pr.repository.host)?;
+        let value: serde_json::Value = serde_json::from_str(&output)?;
+        let Some(node) = value
+            .pointer("/data/repository/pullRequest/reviews/nodes/0")
+            .filter(|node| !node.is_null())
+        else {
+            return Ok(None);
+        };
+        let field = |name: &str| node.get(name).and_then(|v| v.as_str()).unwrap_or("");
+        let id = node
+            .get("databaseId")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| TuicrError::Forge("Pending review has no `databaseId`".to_string()))?;
+        let comment_ids = node
+            .pointer("/comments/nodes")
+            .and_then(|nodes| nodes.as_array())
+            .map(|nodes| {
+                nodes
+                    .iter()
+                    .filter_map(|comment| comment.get("id").and_then(|id| id.as_str()))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Some(PendingReview {
+            node_id: field("id").to_string(),
+            id,
+            body: field("body").to_string(),
+            html_url: field("url").to_string(),
+            comment_ids,
+        }))
+    }
+
+    /// `:submit` while the viewer already has a pending review. GitHub allows
+    /// one per person, so the new comments go into it rather than into a new
+    /// review, and then it is published with the event (a draft stays
+    /// pending). The pending review is the user's own work: a failure removes
+    /// only the comments this call added, and leaves the rest as it was.
+    fn extend_pending_review(
+        &self,
+        pr: &PullRequestDetails,
+        request: &CreateReviewRequest<'_>,
+        pending: &PendingReview,
+    ) -> Result<GhCreateReviewResponse> {
+        let mut added = Vec::new();
+        let result = self.add_to_pending_review(pr, request, pending, &mut added);
+        if result.is_err() {
+            for comment_id in &added {
+                // Best effort, like the delete on the create path.
+                let _ = self.delete_review_comment(pr, comment_id);
+            }
+        }
+        result
+    }
+
+    fn add_to_pending_review(
+        &self,
+        pr: &PullRequestDetails,
+        request: &CreateReviewRequest<'_>,
+        pending: &PendingReview,
+        added: &mut Vec<String>,
+    ) -> Result<GhCreateReviewResponse> {
+        for comment in request.comments {
+            added.push(self.add_review_thread(pr, &pending.node_id, comment)?);
+        }
+        for reply in request.thread_replies {
+            added.push(self.add_thread_reply(pr, &pending.node_id, reply)?);
+        }
+
+        let body = [pending.body.as_str(), request.body]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let Some(event) = request.event.github_event() else {
+            if body != pending.body {
+                self.update_review_body(pr, &pending.node_id, &body)?;
+            }
+            return Ok(GhCreateReviewResponse {
+                id: pending.id,
+                html_url: pending.html_url.clone(),
+                state: "PENDING".to_string(),
+            });
+        };
+        let mut payload = serde_json::Map::new();
+        payload.insert("event".to_string(), event.into());
+        if !body.is_empty() {
+            payload.insert("body".to_string(), body.into());
+        }
+        let endpoint = format!("{}/{}/events", reviews_endpoint(pr), pending.id);
+        let output = self.post_json(pr, endpoint, "POST", &payload.into())?;
+        parse_create_review_response(&output)
+    }
+
+    /// Adds `comment` to the pending review as a new thread; returns the new
+    /// comment's node id. Lines go with `-F` so GitHub gets integers; every
+    /// text value goes with `-f`, raw.
+    fn add_review_thread(
+        &self,
+        pr: &PullRequestDetails,
+        review_node_id: &str,
+        comment: &crate::forge::submit::InlineComment,
+    ) -> Result<String> {
+        let mut args = vec![
+            "api".to_string(),
+            "graphql".to_string(),
+            "-f".to_string(),
+            format!("query={ADD_REVIEW_THREAD_MUTATION}"),
+            "-f".to_string(),
+            format!("review={review_node_id}"),
+            "-f".to_string(),
+            format!("path={}", comment.path.to_string_lossy().replace('\\', "/")),
+            "-F".to_string(),
+            format!("line={}", comment.line),
+            "-f".to_string(),
+            format!("side={}", comment.side.as_str()),
+            "-f".to_string(),
+            format!("body={}", comment.body),
+        ];
+        if let (Some(start_line), Some(start_side)) = (comment.start_line, comment.start_side) {
+            args.extend([
+                "-F".to_string(),
+                format!("startLine={start_line}"),
+                "-f".to_string(),
+                format!("startSide={}", start_side.as_str()),
+            ]);
+        }
+        let output = self.run_graphql(pr, args)?;
+        created_comment_id(
+            &output,
+            &[
+                "addPullRequestReviewThread",
+                "thread",
+                "comments",
+                "nodes",
+                "0",
+                "id",
+            ],
+        )
+    }
+
+    fn update_review_body(
+        &self,
+        pr: &PullRequestDetails,
+        review_node_id: &str,
+        body: &str,
+    ) -> Result<()> {
+        let args = vec![
+            "api".to_string(),
+            "graphql".to_string(),
+            "-f".to_string(),
+            format!("query={UPDATE_REVIEW_BODY_MUTATION}"),
+            "-f".to_string(),
+            format!("review={review_node_id}"),
+            "-f".to_string(),
+            format!("body={body}"),
+        ];
+        self.run_graphql(pr, args).map(|_| ())
+    }
+
+    fn delete_review_comment(&self, pr: &PullRequestDetails, comment_node_id: &str) -> Result<()> {
+        let args = vec![
+            "api".to_string(),
+            "graphql".to_string(),
+            "-f".to_string(),
+            format!("query={DELETE_REVIEW_COMMENT_MUTATION}"),
+            "-f".to_string(),
+            format!("comment={comment_node_id}"),
+        ];
+        self.run_graphql(pr, args).map(|_| ())
     }
 
     fn delete_pending_review(&self, pr: &PullRequestDetails, review_id: u64) -> Result<()> {
@@ -1128,6 +1338,46 @@ fn map_create_review_error(error: GhCommandError, host: &str) -> TuicrError {
     map_gh_error(error, host)
 }
 
+/// The viewer's pending review on a PR, which GitHub keeps one of per person.
+struct PendingReview {
+    node_id: String,
+    id: u64,
+    body: String,
+    html_url: String,
+    /// Node ids of the review's comments, so a discard can delete them.
+    comment_ids: Vec<String>,
+}
+
+const PENDING_REVIEW_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
+    repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
+    reviews(states: PENDING, first: 1) { nodes { id databaseId body url \
+    comments(first: 100) { nodes { id } } } } } } }";
+
+const ADD_REVIEW_THREAD_MUTATION: &str = "mutation($review: ID!, $path: String!, $line: Int!, \
+    $side: DiffSide!, $startLine: Int, $startSide: DiffSide, $body: String!) { \
+    addPullRequestReviewThread(input: {pullRequestReviewId: $review, path: $path, line: $line, \
+    side: $side, startLine: $startLine, startSide: $startSide, body: $body}) { \
+    thread { comments(first: 1) { nodes { id } } } } }";
+
+const UPDATE_REVIEW_BODY_MUTATION: &str = "mutation($review: ID!, $body: String!) { \
+    updatePullRequestReview(input: {pullRequestReviewId: $review, body: $body}) { \
+    pullRequestReview { id } } }";
+
+const DELETE_REVIEW_COMMENT_MUTATION: &str = "mutation($comment: ID!) { \
+    deletePullRequestReviewComment(input: {id: $comment}) { clientMutationId } }";
+
+/// The node id a GraphQL mutation reports for the comment it created, found
+/// under `data` by `path` (array indices as strings).
+fn created_comment_id(output: &str, path: &[&str]) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(output)?;
+    let pointer = format!("/data/{}", path.join("/"));
+    value
+        .pointer(&pointer)
+        .and_then(|id| id.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| TuicrError::Forge(format!("GitHub response missing `{pointer}`")))
+}
+
 const ADD_THREAD_REPLY_MUTATION: &str = "mutation($review: ID!, $thread: ID!, $body: String!) { \
     addPullRequestReviewThreadReply(input: {pullRequestReviewId: $review, \
     pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }";
@@ -1291,6 +1541,8 @@ index 1111111..2222222 100644
                     } else if query.contains("viewer { login }") && query.contains("commit { oid }")
                     {
                         Ok(REVIEW_METADATA_JSON.to_string())
+                    } else if query.contains("states: PENDING") {
+                        Ok(NO_PENDING_REVIEW_JSON.to_string())
                     } else if query.contains("reviews(") {
                         Ok(REVIEW_SUMMARIES_JSON.to_string())
                     } else {
@@ -1353,6 +1605,9 @@ index 1111111..2222222 100644
                 .unwrap_or_else(|| CREATE_REVIEW_RESPONSE_JSON.to_string()))
         }
     }
+
+    const NO_PENDING_REVIEW_JSON: &str =
+        r#"{"data": {"repository": {"pullRequest": {"reviews": {"nodes": []}}}}}"#;
 
     const CREATE_REVIEW_RESPONSE_JSON: &str = r##"{
         "id": 123456,
@@ -2790,6 +3045,12 @@ Match host github-work
         ))
     }
 
+    fn reply_json(comment_id: &str) -> GhCommandResult<String> {
+        Ok(format!(
+            r#"{{"data": {{"addPullRequestReviewThreadReply": {{"comment": {{"id": "{comment_id}"}}}}}}}}"#
+        ))
+    }
+
     fn reply_posts() -> Vec<ThreadReplyPost> {
         vec![
             ThreadReplyPost {
@@ -2832,9 +3093,10 @@ Match host github-work
     #[test]
     fn should_create_pending_then_reply_then_publish_when_answering_threads() {
         let runner = ScriptedGhRunner::new(vec![
+            Ok(NO_PENDING_REVIEW_JSON.into()),
             review_json("PENDING"),
-            Ok("{}".into()),
-            Ok("{}".into()),
+            reply_json("PRRC_new_1"),
+            reply_json("PRRC_new_2"),
             review_json("COMMENTED"),
         ]);
 
@@ -2843,10 +3105,13 @@ Match host github-work
         let response = result.unwrap();
         assert_eq!(response.id, 900);
         assert_eq!(response.state, "COMMENTED");
-        assert_eq!(calls.len(), 4);
+        assert_eq!(calls.len(), 5);
+
+        // 0. no pending review yet
+        assert!(calls[0].0[3].contains("states: PENDING"));
 
         // 1. pending review: inline comments, no event
-        let (args, stdin) = &calls[0];
+        let (args, stdin) = &calls[1];
         assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews");
         let payload: serde_json::Value = serde_json::from_str(stdin.as_deref().unwrap()).unwrap();
         assert!(payload.get("event").is_none());
@@ -2854,7 +3119,7 @@ Match host github-work
 
         // 2-3. one GraphQL reply per thread, into the pending review, with
         // every value passed raw so `@alice` is not read as a file
-        for (call, (thread, body)) in calls[1..3]
+        for (call, (thread, body)) in calls[2..4]
             .iter()
             .zip([("PRRT_a", "fixed"), ("PRRT_b", "@alice see above")])
         {
@@ -2871,7 +3136,7 @@ Match host github-work
         }
 
         // 4. publish with the event and body
-        let (args, stdin) = &calls[3];
+        let (args, stdin) = &calls[4];
         assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews/900/events");
         let payload: serde_json::Value = serde_json::from_str(stdin.as_deref().unwrap()).unwrap();
         assert_eq!(payload["event"], "COMMENT");
@@ -2881,20 +3146,22 @@ Match host github-work
     #[test]
     fn should_leave_a_draft_with_thread_replies_pending() {
         let runner = ScriptedGhRunner::new(vec![
+            Ok(NO_PENDING_REVIEW_JSON.into()),
             review_json("PENDING"),
-            Ok("{}".into()),
-            Ok("{}".into()),
+            reply_json("PRRC_new_1"),
+            reply_json("PRRC_new_2"),
         ]);
 
         let (result, calls) = submit_with_replies(runner, SubmitEvent::Draft);
 
         assert_eq!(result.unwrap().state, "PENDING");
-        assert_eq!(calls.len(), 3, "no publish call for a draft");
+        assert_eq!(calls.len(), 4, "no publish call for a draft");
     }
 
     #[test]
     fn should_delete_the_pending_review_when_a_thread_reply_fails() {
         let runner = ScriptedGhRunner::new(vec![
+            Ok(NO_PENDING_REVIEW_JSON.into()),
             review_json("PENDING"),
             Err(GhCommandError::Failed {
                 status: Some(1),
@@ -2908,9 +3175,174 @@ Match host github-work
 
         let error = result.unwrap_err().to_string();
         assert!(error.contains("PRRT_a"), "{error}");
-        assert_eq!(calls.len(), 3);
-        let (args, _) = &calls[2];
+        assert_eq!(calls.len(), 4);
+        let (args, _) = &calls[3];
         assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews/900");
         assert!(args.windows(2).any(|w| w == ["--method", "DELETE"]));
+    }
+
+    // an existing pending review
+
+    fn pending_review_json() -> GhCommandResult<String> {
+        Ok(
+            r#"{"data": {"repository": {"pullRequest": {"reviews": {"nodes": [
+            {"id": "PRR_old", "databaseId": 700, "body": "earlier notes",
+             "url": "https://github.com/agavra/tuicr/pull/125#pullrequestreview-700",
+             "comments": {"nodes": [{"id": "PRRC_old_1"}, {"id": "PRRC_old_2"}]}}
+        ]}}}}}"#
+                .into(),
+        )
+    }
+
+    fn thread_json(comment_id: &str) -> GhCommandResult<String> {
+        Ok(format!(
+            r#"{{"data": {{"addPullRequestReviewThread": {{"thread": {{"comments": {{"nodes": [{{"id": "{comment_id}"}}]}}}}}}}}}}"#
+        ))
+    }
+
+    fn query_of(call: &(Vec<String>, Option<String>)) -> &str {
+        call.0
+            .iter()
+            .find(|arg| arg.starts_with("query="))
+            .map(String::as_str)
+            .unwrap_or("")
+    }
+
+    #[test]
+    fn should_add_to_and_publish_an_existing_pending_review() {
+        let runner = ScriptedGhRunner::new(vec![
+            pending_review_json(),
+            thread_json("PRRC_new"),
+            reply_json("PRRC_r1"),
+            reply_json("PRRC_r2"),
+            review_json("COMMENTED"),
+        ]);
+
+        let (result, calls) = submit_with_replies(runner, SubmitEvent::Comment);
+
+        assert_eq!(result.unwrap().state, "COMMENTED");
+        assert_eq!(calls.len(), 5);
+        // the inline comment becomes a thread in the pending review, its line
+        // passed typed and its text raw
+        assert!(query_of(&calls[1]).contains("addPullRequestReviewThread("));
+        let args = &calls[1].0;
+        assert!(args.contains(&"review=PRR_old".to_string()));
+        let line = args.iter().position(|a| a == "line=42").unwrap();
+        assert_eq!(args[line - 1], "-F");
+        assert!(args.contains(&"side=RIGHT".to_string()));
+        // the replies go into the same review
+        assert!(query_of(&calls[2]).contains("addPullRequestReviewThreadReply"));
+        assert!(calls[3].0.contains(&"review=PRR_old".to_string()));
+        // and it is published, with both bodies, no new review created
+        let (args, stdin) = &calls[4];
+        assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews/700/events");
+        let payload: serde_json::Value = serde_json::from_str(stdin.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["event"], "COMMENT");
+        assert_eq!(payload["body"], "earlier notes\n\nsummary");
+    }
+
+    #[test]
+    fn should_add_a_draft_to_an_existing_pending_review_without_publishing() {
+        let runner = ScriptedGhRunner::new(vec![
+            pending_review_json(),
+            thread_json("PRRC_new"),
+            reply_json("PRRC_r1"),
+            reply_json("PRRC_r2"),
+            Ok("{}".into()),
+        ]);
+
+        let (result, calls) = submit_with_replies(runner, SubmitEvent::Draft);
+
+        let response = result.unwrap();
+        assert_eq!(response.id, 700);
+        assert_eq!(response.state, "PENDING");
+        assert_eq!(calls.len(), 5);
+        assert!(query_of(&calls[4]).contains("updatePullRequestReview"));
+        assert!(
+            calls[4]
+                .0
+                .contains(&"body=earlier notes\n\nsummary".to_string())
+        );
+    }
+
+    #[test]
+    fn should_remove_only_what_it_added_when_extending_a_pending_review_fails() {
+        let runner = ScriptedGhRunner::new(vec![
+            pending_review_json(),
+            thread_json("PRRC_new"),
+            Err(GhCommandError::Failed {
+                status: Some(1),
+                stderr: "GraphQL: thread is gone".into(),
+            }),
+            Ok("{}".into()),
+        ]);
+
+        let (result, calls) = submit_with_replies(runner, SubmitEvent::Comment);
+
+        assert!(result.is_err());
+        assert_eq!(calls.len(), 4);
+        // the comment it added is removed, the pending review is not deleted
+        assert!(query_of(&calls[3]).contains("deletePullRequestReviewComment"));
+        assert!(calls[3].0.contains(&"comment=PRRC_new".to_string()));
+        assert!(
+            !calls
+                .iter()
+                .any(|call| call.0.windows(2).any(|w| w == ["--method", "DELETE"]))
+        );
+    }
+
+    #[test]
+    fn should_discard_a_pending_review_and_report_when_there_is_none() {
+        let details = GitHubGhBackend::with_runner(Some(repo()), FakeGhRunner::default())
+            .get_pull_request(parse_pull_request_target("125").unwrap())
+            .unwrap();
+
+        let backend = GitHubGhBackend::with_runner(
+            Some(repo()),
+            ScriptedGhRunner::new(vec![
+                pending_review_json(),
+                Ok("{}".into()),
+                Ok("{}".into()),
+                Ok(String::new()),
+            ]),
+        );
+        assert!(backend.discard_pending_review(&details).unwrap());
+        let calls = backend.runner.calls.lock().unwrap().clone();
+        // the review's comments first: deleting only the review would leave
+        // them behind as orphaned pending comments
+        for (call, comment) in calls[1..3].iter().zip(["PRRC_old_1", "PRRC_old_2"]) {
+            assert!(query_of(call).contains("deletePullRequestReviewComment"));
+            assert!(call.0.contains(&format!("comment={comment}")));
+        }
+        assert_eq!(calls[3].0[1], "repos/agavra/tuicr/pulls/125/reviews/700");
+        assert!(calls[3].0.windows(2).any(|w| w == ["--method", "DELETE"]));
+
+        let backend = GitHubGhBackend::with_runner(
+            Some(repo()),
+            ScriptedGhRunner::new(vec![Ok(NO_PENDING_REVIEW_JSON.into())]),
+        );
+        assert!(!backend.discard_pending_review(&details).unwrap());
+    }
+
+    #[test]
+    fn should_count_a_review_gone_with_its_last_comment_as_discarded() {
+        let details = GitHubGhBackend::with_runner(Some(repo()), FakeGhRunner::default())
+            .get_pull_request(parse_pull_request_target("125").unwrap())
+            .unwrap();
+        let backend = GitHubGhBackend::with_runner(
+            Some(repo()),
+            ScriptedGhRunner::new(vec![
+                pending_review_json(),
+                Ok("{}".into()),
+                Ok("{}".into()),
+                Err(GhCommandError::Failed {
+                    status: Some(1),
+                    stderr: "gh: Not Found (HTTP 404)".into(),
+                }),
+                Ok(NO_PENDING_REVIEW_JSON.into()),
+            ]),
+        );
+
+        assert!(backend.discard_pending_review(&details).unwrap());
     }
 }

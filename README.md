@@ -144,7 +144,8 @@ When you're done reviewing, send your comments wherever the work continues.
 
 `:submit` opens a picker for Comment, Approve, Request changes, or Draft. Inline comments land
 on the right lines as a real PR review. Review-level comments become the review summary.
-Requires `gh` authenticated to the repo.
+A pending (draft) review you already have is extended and published rather than replaced, and
+`:submit discard` deletes it. Requires `gh` authenticated to the repo.
 
 ### To GitLab
 

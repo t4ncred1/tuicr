@@ -96,6 +96,9 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         &["submit request-changes"],
         CommandKind::Submit(SubmitEvent::RequestChanges),
     ),
+    // Ahead of `submit draft`, so reverse completion from `:submit` does not
+    // land on the destructive one first.
+    CommandSpec::new(&["submit discard"], CommandKind::DiscardPendingReview),
     CommandSpec::new(&["submit draft"], CommandKind::Submit(SubmitEvent::Draft)),
     CommandSpec::new(&["summary"], CommandKind::Summary),
     CommandSpec::new(&["theme"], CommandKind::ThemePicker),
@@ -132,6 +135,8 @@ impl CommandSpec {
 /// CommandKind is the parsed meaning of one command-mode input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandKind {
+    /// `:submit discard`: delete the viewer's pending review after a prompt.
+    DiscardPendingReview,
     Quit,
     ForceQuit,
     Write,
@@ -1066,6 +1071,13 @@ fn dispatch_command(app: &mut App, kind: CommandKind) -> CommandAfterDispatch {
             app.start_submit(event);
             CommandAfterDispatch::KeepMode
         }
+        CommandKind::DiscardPendingReview => {
+            app.exit_command_mode();
+            if app.can_discard_pending_review() {
+                app.enter_confirm_mode(app::ConfirmAction::DiscardPendingReview);
+            }
+            CommandAfterDispatch::KeepMode
+        }
         CommandKind::Comments(visibility) => {
             set_remote_comments_visibility(app, visibility);
             CommandAfterDispatch::ExitCommandMode
@@ -1307,11 +1319,14 @@ pub fn handle_comment_action(app: &mut App, action: Action) {
 pub fn handle_confirm_action(app: &mut App, action: Action) {
     // Only the quit prompts end the session. A Sessions-tab delete answers
     // in place and returns to the selector.
-    let quits = app.pending_confirm != Some(app::ConfirmAction::DeleteSession);
+    let quits = app.pending_confirm == Some(app::ConfirmAction::CopyAndQuit);
     match action {
         Action::ConfirmYes => {
             if let Some(app::ConfirmAction::DeleteSession) = app.pending_confirm {
                 app.sessions_tab_delete_selected();
+            }
+            if let Some(app::ConfirmAction::DiscardPendingReview) = app.pending_confirm {
+                app.start_discard_pending_review();
             }
             if let Some(app::ConfirmAction::CopyAndQuit) = app.pending_confirm {
                 let slug = app.session_slug();

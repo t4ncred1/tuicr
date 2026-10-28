@@ -876,6 +876,13 @@ pub fn render_help(frame: &mut Frame, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled(
+                "  :submit discard",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Delete your pending review on GitHub"),
+        ]),
+        Line::from(vec![
+            Span::styled(
                 "  :set relativenumber[!]",
                 Style::default().add_modifier(Modifier::BOLD),
             ),

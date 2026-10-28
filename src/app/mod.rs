@@ -725,13 +725,15 @@ pub enum ConfirmAction {
     /// Delete the session under the cursor on the Sessions tab. Unlike
     /// `CopyAndQuit` this returns to the selector instead of quitting.
     DeleteSession,
+    /// `:submit discard`: delete the viewer's pending review on the forge.
+    DiscardPendingReview,
 }
 
 impl ConfirmAction {
     /// Mode to return to once the prompt is answered either way.
     pub fn return_mode(self) -> InputMode {
         match self {
-            ConfirmAction::CopyAndQuit => InputMode::Normal,
+            ConfirmAction::CopyAndQuit | ConfirmAction::DiscardPendingReview => InputMode::Normal,
             ConfirmAction::DeleteSession => InputMode::CommitSelect,
         }
     }
@@ -741,6 +743,7 @@ impl ConfirmAction {
         match self {
             ConfirmAction::CopyAndQuit => "Copy review to clipboard?",
             ConfirmAction::DeleteSession => "Delete this saved review?",
+            ConfirmAction::DiscardPendingReview => "Discard your pending review on the forge?",
         }
     }
 }
@@ -1355,6 +1358,9 @@ pub struct App {
     /// Background-thread channel that delivers the create-review result.
     /// `Receiver` is only present while a submit is in flight.
     pub pr_submit_rx: Option<std::sync::mpsc::Receiver<PrSubmitEvent>>,
+    /// Receiver for an in-flight `:submit discard`: whether a pending review
+    /// was deleted, or why not.
+    pub pr_discard_rx: Option<std::sync::mpsc::Receiver<std::result::Result<bool, String>>>,
     /// Latest known PR head SHA from the remote. PR 5 leaves this as the
     /// open-time head so the stale-head warning never fires; PR 6 may refresh
     /// it via a pre-submit `gh pr view` to power the warning.

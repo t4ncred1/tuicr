@@ -27,6 +27,10 @@ impl App {
             UnmappableItem, map_comment,
         };
 
+        // With a pending review on the forge, any submit finishes it, so the
+        // confirmation that says so is shown even from the action picker.
+        let skip_confirm = skip_confirm && self.pending_review_comment_count() == 0;
+
         let DiffSource::PullRequest(pr) = &self.diff_source else {
             self.set_warning(":submit only applies in PR mode");
             return;
@@ -178,10 +182,13 @@ impl App {
         }
 
         // Approve is the one event that's meaningful with no comments — a
-        // bare "LGTM" approval. Every other event needs at least one local
-        // draft comment or a review-level comment, otherwise there's
-        // nothing to submit.
-        let bare_allowed = matches!(event, crate::forge::submit::SubmitEvent::Approve);
+        // bare "LGTM" approval. Publishing the viewer's pending review is the
+        // other: its comments are already on the forge. Every other event
+        // needs at least one local draft comment or a review-level comment,
+        // otherwise there's nothing to submit.
+        let bare_allowed = matches!(event, crate::forge::submit::SubmitEvent::Approve)
+            || (event != crate::forge::submit::SubmitEvent::Draft
+                && self.pending_review_comment_count() > 0);
         if !bare_allowed && total_local_drafts == 0 && self.postable_review_comments().is_empty() {
             self.set_warning("Nothing to submit — no local-draft comments");
             return;
@@ -240,7 +247,8 @@ impl App {
     }
 
     /// Confirm the action picker selection: dispatch into preflight with the
-    /// chosen event and `skip_confirm = true`.
+    /// chosen event and `skip_confirm = true` (preflight still confirms when
+    /// a pending review would be published).
     pub fn submit_picker_confirm(&mut self) {
         let Some(event) = SUBMIT_PICKER_EVENTS
             .get(self.submit_picker_cursor)
@@ -459,6 +467,98 @@ impl App {
             });
         });
         Ok(())
+    }
+
+    /// Comments of the viewer's pending (draft) review on the forge, as the
+    /// last thread fetch saw them. `:submit` publishes that review together
+    /// with any new local drafts.
+    pub fn pending_review_comment_count(&self) -> usize {
+        self.forge_review_threads
+            .iter()
+            .flat_map(|thread| &thread.comments)
+            .filter(|comment| comment.is_pending)
+            .count()
+    }
+
+    /// Whether `:submit discard` can run here, warning when it cannot.
+    pub fn can_discard_pending_review(&mut self) -> bool {
+        let Some(kind) = self.forge_kind() else {
+            self.set_warning(":submit discard only applies in PR mode");
+            return false;
+        };
+        if !kind.supports_thread_replies() {
+            self.set_warning(format!(
+                "{} has no pending review to discard from tuicr",
+                kind.display_name()
+            ));
+            return false;
+        }
+        if self.pr_submit_rx.is_some() || self.pr_discard_rx.is_some() {
+            self.set_warning("A submit is still running");
+            return false;
+        }
+        true
+    }
+
+    /// Deletes the viewer's pending review on a background thread; the
+    /// result lands in `poll_pr_discard_events`.
+    pub fn start_discard_pending_review(&mut self) {
+        let DiffSource::PullRequest(pr) = &self.diff_source else {
+            return;
+        };
+        let repository = pr.key.repository.clone();
+        let pr_number = pr.key.number;
+        let local_checkout = self
+            .forge_backend
+            .as_deref()
+            .and_then(|backend| backend.local_checkout_path());
+        let show_pr_checks = self.show_pr_checks;
+        let show_pr_comments = self.show_pr_comments;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.pr_discard_rx = Some(rx);
+        self.set_message("Discarding pending review…");
+        std::thread::spawn(move || {
+            use crate::forge::traits::PullRequestTarget;
+
+            let backend = create_forge_backend(
+                &repository,
+                local_checkout,
+                show_pr_checks,
+                show_pr_comments,
+            );
+            let target = PullRequestTarget::with_repository(
+                repository.clone(),
+                pr_number,
+                pr_number.to_string(),
+            );
+            let result = backend
+                .get_pull_request(target)
+                .and_then(|details| backend.discard_pending_review(&details))
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Apply a finished `:submit discard`: report it and refetch the threads,
+    /// so the discarded draft comments disappear.
+    pub fn poll_pr_discard_events(&mut self) {
+        let Some(rx) = self.pr_discard_rx.as_ref() else {
+            return;
+        };
+        let Ok(result) = rx.try_recv() else {
+            return;
+        };
+        self.pr_discard_rx = None;
+        let forge = self.forge_display_name();
+        match result {
+            Ok(true) => {
+                self.set_message(format!("Discarded your pending {forge} review"));
+                self.refetch_pr_threads();
+            }
+            Ok(false) => self.set_message(format!("No pending {forge} review to discard")),
+            Err(e) => self.set_error(format!("Discard failed: {e}")),
+        }
     }
 
     /// Pump a pending create-review result. Applies lifecycle writes + the

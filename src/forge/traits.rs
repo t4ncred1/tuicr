@@ -653,6 +653,15 @@ pub trait ForgeBackend {
     /// mapping, comment serialization) are the backend's responsibility — the
     /// caller only supplies the high-level inputs. Returns a minimal response
     /// describing the created review (id, html_url, state).
+    /// Delete the viewer's pending (draft) review on `pr`, if any. Returns
+    /// whether one was deleted. Forges without pending reviews report the
+    /// operation unsupported.
+    fn discard_pending_review(&self, _pr: &PullRequestDetails) -> Result<bool> {
+        Err(TuicrError::UnsupportedOperation(
+            "Discarding a pending review is not supported for this forge".into(),
+        ))
+    }
+
     fn create_review(
         &self,
         pr: &PullRequestDetails,

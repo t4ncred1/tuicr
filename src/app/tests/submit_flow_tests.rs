@@ -1802,3 +1802,91 @@ fn should_mark_navigator_rows_of_threads_with_pending_comments() {
         }
     );
 }
+
+// publishing and discarding a pending review
+
+/// The PR app with its forge thread's reply sitting in the viewer's pending
+/// review.
+fn pr_app_with_pending_review() -> App {
+    let mut app = pr_app_with_cursor_on_forge_thread();
+    app.forge_review_threads[0].comments[1].is_pending = true;
+    app
+}
+
+#[test]
+fn should_publish_a_pending_review_without_new_local_drafts() {
+    let mut app = pr_app_with_pending_review();
+    assert_eq!(app.pending_review_comment_count(), 1);
+
+    app.start_submit(SubmitEvent::Comment);
+
+    let state = app.submit_state.as_ref().expect("submit state");
+    assert!(state.mappable.is_empty());
+    assert!(state.thread_replies.is_empty());
+    assert_eq!(app.input_mode, InputMode::SubmitConfirm);
+}
+
+#[test]
+fn should_find_nothing_to_add_to_a_pending_review_without_new_drafts() {
+    let mut app = pr_app_with_pending_review();
+
+    app.start_submit(SubmitEvent::Draft);
+
+    assert!(app.submit_state.is_none());
+    assert_eq!(app.input_mode, InputMode::Normal);
+}
+
+#[test]
+fn should_offer_discarding_a_pending_review_only_on_github() {
+    let mut app = pr_app_with_pending_review();
+    assert!(app.can_discard_pending_review());
+
+    switch_forge(&mut app, crate::forge::traits::ForgeKind::GitLab);
+    assert!(!app.can_discard_pending_review());
+
+    app.diff_source = DiffSource::StagedAndUnstaged;
+    assert!(!app.can_discard_pending_review());
+}
+
+#[test]
+fn should_keep_tuicr_open_when_declining_to_discard() {
+    let mut app = pr_app_with_pending_review();
+    app.enter_confirm_mode(ConfirmAction::DiscardPendingReview);
+
+    crate::handler::handle_confirm_action(&mut app, crate::input::Action::ConfirmNo);
+
+    assert!(!app.should_quit);
+    assert_eq!(app.input_mode, InputMode::Normal);
+    assert!(app.pr_discard_rx.is_none());
+}
+
+#[test]
+fn should_report_the_outcome_of_a_discard() {
+    let mut app = pr_app_with_pending_review();
+    let deliver = |app: &mut App, result: std::result::Result<bool, String>| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(result).unwrap();
+        app.pr_discard_rx = Some(rx);
+        app.poll_pr_discard_events();
+    };
+
+    deliver(&mut app, Ok(false));
+    let message = app.message.as_ref().expect("message").content.clone();
+    assert!(message.contains("No pending"), "{message}");
+    assert!(app.pr_discard_rx.is_none());
+
+    deliver(&mut app, Err("boom".to_string()));
+    let message = app.message.as_ref().expect("message").content.clone();
+    assert!(message.contains("Discard failed: boom"), "{message}");
+}
+
+#[test]
+fn should_confirm_a_picker_submit_that_would_publish_a_pending_review() {
+    let mut app = pr_app_with_pending_review();
+    app.submit_picker_cursor = 0;
+
+    app.submit_picker_confirm();
+
+    assert_eq!(app.input_mode, InputMode::SubmitConfirm);
+    assert!(app.pr_submit_rx.is_none(), "nothing was sent yet");
+}

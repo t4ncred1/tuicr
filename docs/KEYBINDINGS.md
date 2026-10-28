@@ -187,6 +187,13 @@ comments (`[PR draft]`), in the header of the GitHub thread comments they turn
 into after the next fetch (`[github @you draft]`, `↳ @you draft`), and as a `D`
 row in the comment navigator. Your published comments read `posted`.
 
+On GitHub, `:submit` works with that pending review instead of failing on it:
+new local drafts are added into it, and it is published with the event you
+pick (`:submit draft` only adds them). With nothing new, `:submit` publishes
+the pending review as it is. The confirmation lists how many comments it
+already holds, and it is shown even after picking from the bare `:submit` menu,
+which otherwise skips it. `:submit discard` deletes it after a confirmation.
+
 `e` opens the file at the cursor's line. Terminal editors (`vim`, `nvim`, `nano`, …)
 take over the screen and tuicr reloads the diff once they exit. Windowed editors
 (`code`, `cursor`, `zed`, `subl`, …) open in their own window while tuicr stays on
@@ -270,6 +277,7 @@ In command mode,
 | `:submit approve` | Submit an Approve review |
 | `:submit request-changes` | Submit a Request-changes review |
 | `:submit draft` | Submit a Draft (pending) review |
+| `:submit discard` | Delete your pending review on GitHub, after a confirmation |
 | `:comments unresolved` | Show unresolved remote comments (PR mode, default) |
 | `:comments all` | Show all remote comments including resolved and outdated |
 | `:comments hide` | Hide remote comments in PR mode |

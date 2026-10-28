@@ -633,6 +633,7 @@ impl App {
             submit_picker_cursor: 0,
             pr_submit_state: None,
             pr_submit_rx: None,
+            pr_discard_rx: None,
             current_pr_head: None,
             pr_info: None,
             show_pr_checks: false,
