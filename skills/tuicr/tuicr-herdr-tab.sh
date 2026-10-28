@@ -50,19 +50,46 @@ repo_root=$(git -C "$TUICR_TARGET_DIR" rev-parse --show-toplevel 2>/dev/null) ||
   repo_root=$(cd "$TUICR_TARGET_DIR" && jj root 2>/dev/null) ||
   repo_root=$(cd "$TUICR_TARGET_DIR" && pwd)
 
-# A keybinding names the active workspace. A pane's own HERDR_WORKSPACE_ID can
-# go stale when Herdr renumbers workspaces, so it is used only while it still
-# exists; otherwise the focused workspace, where the user just asked for this.
-workspaces=$("$HERDR_BIN" workspace list)
+# The git directory a checkout shares with all its worktrees, so an agent pane
+# that started in one worktree matches a review of another.
+common_git_dir() {
+  git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null
+}
+
+# Which workspace to open the tab in. A keybinding names the active one. An
+# agent's own HERDR_WORKSPACE_ID cannot be trusted: a Claude Code background
+# session runs in a process pre-started from another pane, which hands it that
+# pane's Herdr variables. So the tab goes beside the agent pane working in
+# this repository; when several are, the one HERDR_PANE_ID names, then the
+# focused workspace's. With no agent pane in the repository, the focused
+# workspace, where the user just asked for the review.
+focused_workspace=$("$HERDR_BIN" workspace list |
+  "$JQ_BIN" -er '[.result.workspaces[] | select(.focused)][0].workspace_id')
 workspace_id="${HERDR_ACTIVE_WORKSPACE_ID:-}"
-if [[ -z "$workspace_id" && -n "${HERDR_WORKSPACE_ID:-}" ]]; then
-  workspace_id=$(printf '%s' "$workspaces" | "$JQ_BIN" -r --arg ws "$HERDR_WORKSPACE_ID" \
-    '.result.workspaces[] | select(.workspace_id == $ws) | .workspace_id')
+target_git_dir=$(common_git_dir "$repo_root") || target_git_dir=""
+if [[ -z "$workspace_id" && -n "$target_git_dir" ]]; then
+  matches=()
+  while IFS=$'\t' read -r pane ws cwd; do
+    if [[ "$(common_git_dir "$cwd")" == "$target_git_dir" ]]; then
+      matches+=("$pane $ws")
+    fi
+  done < <("$HERDR_BIN" pane list |
+    "$JQ_BIN" -r '.result.panes[] | select(.agent != null)
+      | [.pane_id, .workspace_id, .cwd] | @tsv')
+
+  for match in "${matches[@]+"${matches[@]}"}"; do
+    [[ "${match%% *}" == "${HERDR_PANE_ID:-}" ]] && workspace_id="${match#* }"
+  done
+  if [[ -z "$workspace_id" ]]; then
+    for match in "${matches[@]+"${matches[@]}"}"; do
+      [[ "${match#* }" == "$focused_workspace" ]] && workspace_id="$focused_workspace"
+    done
+  fi
+  if [[ -z "$workspace_id" && ${#matches[@]} -gt 0 ]]; then
+    workspace_id="${matches[0]#* }"
+  fi
 fi
-if [[ -z "$workspace_id" ]]; then
-  workspace_id=$(printf '%s' "$workspaces" |
-    "$JQ_BIN" -er '[.result.workspaces[] | select(.focused)][0].workspace_id')
-fi
+workspace_id="${workspace_id:-$focused_workspace}"
 
 # One tab per repository, so a review of another worktree gets its own tab
 # instead of focusing the old one.
