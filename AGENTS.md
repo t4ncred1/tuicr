@@ -367,6 +367,8 @@ These are non-obvious things the implementation chain hit. Worth preserving for 
 
 24. **libgit2 caches the index; pass it fresh.** `Repository::index()` returns libgit2's in-memory copy, and libgit2 re-reads it from disk only for diffs that load the index themselves. Diffs handed `Some(&index)` (staged, unstaged, changed-path listing) would keep using the copy from before an agent's `git add` or `git commit`, so a long-running tuicr showed a "Staged changes" row with nothing staged. `vcs::git::diff::current_index` reloads it; use it wherever an index is passed explicitly.
 
+25. **GitHub thread replies need a pending review.** The REST create-review call cannot carry replies to existing threads, so when `CreateReviewRequest::thread_replies` is non-empty `GitHubGhBackend::create_review` creates the review pending (no `event`), adds each reply with GraphQL `addPullRequestReviewThreadReply` (`pullRequestReviewId` = the review's `node_id`), then publishes through `POST .../reviews/{id}/events` (skipped for `:submit draft`). A failing step deletes the pending review before returning the error, so the caller's all-or-nothing lifecycle rule still holds. Reply values go through `gh api graphql -f`, never `-F`, which would read a body starting with `@` as a file. Without thread replies submit keeps its single call.
+
 ### Keeping Docs Updated
 
 When adding user-facing features, update the relevant documentation:

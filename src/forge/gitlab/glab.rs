@@ -1552,6 +1552,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
         let calls = backend.runner.calls.borrow();
@@ -1614,6 +1615,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
         let calls = backend.runner.calls.borrow();
@@ -1671,6 +1673,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
         let calls = backend.runner.calls.borrow();
@@ -1732,6 +1735,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
         let calls = backend.runner.calls.borrow();
@@ -1775,6 +1779,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
         let calls = backend.runner.calls.borrow();
@@ -1812,6 +1817,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
         let calls = backend.runner.calls.borrow();
@@ -1856,6 +1862,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "COMMENTED");
@@ -1902,6 +1909,7 @@ mod tests {
             commit_id: "headsha1",
             body: "overall please address the comments",
             comments: &[inline],
+            thread_replies: &[],
         };
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "CHANGES_REQUESTED");
@@ -1978,6 +1986,7 @@ mod tests {
             commit_id: "headsha1",
             body: "",
             comments: &[inline],
+            thread_replies: &[],
         };
         let err = backend.create_review(&pr, request).unwrap_err();
         match err {
@@ -2043,6 +2052,7 @@ mod tests {
             commit_id: "headsha1",
             body: "overall draft",
             comments: &[inline],
+            thread_replies: &[],
         };
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "PENDING");
@@ -2124,6 +2134,7 @@ mod tests {
             commit_id: "headsha1",
             body: "overall draft",
             comments: &[inline],
+            thread_replies: &[],
         };
         backend.create_review(&pr, request).unwrap();
 
@@ -2166,6 +2177,7 @@ mod tests {
             commit_id: "headsha1",
             body: "overall comment",
             comments: &[inline],
+            thread_replies: &[],
         };
         let response = backend.create_review(&pr, request).unwrap();
         assert_eq!(response.state, "COMMENTED");

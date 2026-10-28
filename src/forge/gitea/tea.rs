@@ -2233,6 +2233,7 @@ mod tests {
                     commit_id: "headsha",
                     body,
                     comments,
+                    thread_replies: &[],
                 },
             )
             .expect("create review");
@@ -2332,6 +2333,7 @@ mod tests {
                     commit_id: "headsha",
                     body: "   ",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2350,6 +2352,7 @@ mod tests {
                     commit_id: "headsha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();

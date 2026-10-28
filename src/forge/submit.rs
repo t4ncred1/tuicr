@@ -235,6 +235,16 @@ impl UnmappableReason {
     }
 }
 
+/// A local comment answering an existing forge review thread, ready to post
+/// into it. `comment_id` is the local comment's id, so a successful submit can
+/// update its lifecycle like any posted comment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadReplyPost {
+    pub comment_id: String,
+    pub thread_id: String,
+    pub body: String,
+}
+
 /// Outcome of mapping one local `Comment` against the displayed diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MappedComment {

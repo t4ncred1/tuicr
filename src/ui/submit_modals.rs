@@ -166,6 +166,13 @@ pub fn render_submit_confirm(frame: &mut Frame, app: &App) {
         )));
     }
     lines.push(Line::from(format!("Inline: {n}", n = state.mappable.len())));
+    // Only when there are some, so reviews without them keep their layout.
+    if !state.thread_replies.is_empty() {
+        lines.push(Line::from(format!(
+            "Thread replies: {n}",
+            n = state.thread_replies.len()
+        )));
+    }
     lines.push(Line::from(format!("Moved to summary: {moved_count}")));
     lines.push(Line::from(format!("Omitted: {omit_count}")));
     lines.push(Line::from(format!("Body: {body_summary}")));
@@ -493,6 +500,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Comment,
             mappable: Vec::new(),
+            thread_replies: Vec::new(),
             unmappable: vec![
                 unmappable_item(
                     "src/lib.rs",
@@ -540,6 +548,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Comment,
             mappable: Vec::new(),
+            thread_replies: Vec::new(),
             unmappable: vec![
                 unmappable_item(
                     "img.png",
@@ -575,6 +584,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Comment,
             mappable: Vec::new(),
+            thread_replies: Vec::new(),
             unmappable: vec![unmappable_item(
                 "x.rs",
                 CommentType::from_id("note"),
@@ -597,6 +607,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Comment,
             mappable: vec![inline(11), inline(12)],
+            thread_replies: Vec::new(),
             unmappable: Vec::new(),
             resolver_choices: Vec::new(),
             resolver_cursor: 0,
@@ -622,6 +633,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::RequestChanges,
             mappable: vec![inline(11)],
+            thread_replies: Vec::new(),
             unmappable: Vec::new(),
             resolver_choices: Vec::new(),
             resolver_cursor: 0,
@@ -642,6 +654,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Draft,
             mappable: vec![inline(11)],
+            thread_replies: Vec::new(),
             unmappable: Vec::new(),
             resolver_choices: Vec::new(),
             resolver_cursor: 0,
@@ -663,6 +676,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Draft,
             mappable: vec![inline(11)],
+            thread_replies: Vec::new(),
             unmappable: Vec::new(),
             resolver_choices: Vec::new(),
             resolver_cursor: 0,
@@ -686,6 +700,7 @@ mod tests {
         app.submit_state = Some(SubmitState {
             event: SubmitEvent::Comment,
             mappable: vec![inline(11)],
+            thread_replies: Vec::new(),
             unmappable: vec![
                 unmappable_item(
                     "a.rs",

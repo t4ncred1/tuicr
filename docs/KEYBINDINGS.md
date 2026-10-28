@@ -175,10 +175,11 @@ On a forge review thread in PR mode, `a` starts a new comment answering that
 thread instead. The comment sits at the thread's line (or file, or review level)
 and keeps a copy of the thread, so agents reading the session see what it
 answers; its box shows `↪ @author` for the thread's author. Use a local type
-(an agent-directed one, or untyped) to keep the answer local. Forge types are
-offered only where `:submit` can post a reply into the thread; elsewhere a
-forge-type answer goes to the submit resolver rather than being posted as a
-separate comment.
+(an agent-directed one, or untyped) to keep the answer local. A forge-type
+answer is posted into the thread by `:submit`, in the same review as your new
+comments (`:submit draft` leaves it pending with them). That works on GitHub;
+on other forges forge types are not offered for thread answers, and any that
+exist go to the submit resolver rather than being posted as separate comments.
 
 `e` opens the file at the cursor's line. Terminal editors (`vim`, `nvim`, `nano`, …)
 take over the screen and tuicr reloads the diff once they exit. Windowed editors

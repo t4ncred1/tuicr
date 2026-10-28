@@ -1542,6 +1542,7 @@ mod tests {
                     commit_id: "abc1234",
                     body: "LGTM",
                     comments: &comments,
+                    thread_replies: &[],
                 },
             )
             .expect("review");
@@ -1684,6 +1685,7 @@ mod tests {
                     commit_id: "abc1234",
                     body: "still thinking",
                     comments: &comments,
+                    thread_replies: &[],
                 },
             )
             .expect("draft");
@@ -1724,6 +1726,7 @@ mod tests {
                     commit_id: "abc1234",
                     body: "still thinking",
                     comments: &comments,
+                    thread_replies: &[],
                 },
             )
             .expect_err("the third PUT fails");
@@ -1753,6 +1756,7 @@ mod tests {
                     commit_id: "abc1234",
                     body: "still thinking",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .expect_err("the first PUT fails");
@@ -1846,6 +1850,7 @@ mod tests {
                     commit_id: "abc1234",
                     body: "hi",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .expect_err("should refuse");

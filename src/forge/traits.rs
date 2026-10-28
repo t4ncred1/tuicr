@@ -40,7 +40,7 @@ impl ForgeKind {
     /// Whether `:submit` can post a reply into one of this forge's existing
     /// review threads. Elsewhere a thread can still be answered locally.
     pub fn supports_thread_replies(self) -> bool {
-        false
+        matches!(self, ForgeKind::GitHub)
     }
 }
 
@@ -466,6 +466,10 @@ pub struct CreateReviewRequest<'a> {
     pub commit_id: &'a str,
     pub body: &'a str,
     pub comments: &'a [crate::forge::submit::InlineComment],
+    /// Answers to existing review threads, posted into the same review. Only
+    /// forges whose `ForgeKind::supports_thread_replies` is true are given
+    /// any; the others always see an empty slice.
+    pub thread_replies: &'a [crate::forge::submit::ThreadReplyPost],
 }
 
 /// A single commit on a pull request, as returned by the forge.

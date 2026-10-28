@@ -1363,6 +1363,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "overall looks fine",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         let response = backend.create_review(&details(), request).unwrap();
@@ -1391,6 +1392,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         backend.create_review(&details(), request).unwrap();
@@ -1408,6 +1410,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         backend.create_review(&details(), request).unwrap();
@@ -1428,6 +1431,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         backend.create_review(&details(), request).unwrap();
@@ -1448,6 +1452,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         backend.create_review(&details(), request).unwrap();
@@ -1467,6 +1472,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         let response = backend.create_review(&details(), request).unwrap();
@@ -1498,6 +1504,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "hello",
             comments: &[],
+            thread_replies: &[],
         };
         // when
         let response = backend.create_review(&details(), request).unwrap();
@@ -1519,6 +1526,7 @@ mod tests {
                 commit_id: &"a".repeat(40),
                 body: "text",
                 comments: &[],
+                thread_replies: &[],
             };
             // when
             let err = backend.create_review(&details(), request).unwrap_err();
@@ -1565,6 +1573,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "text",
             comments: &[],
+            thread_replies: &[],
         };
         // when
         let err = backend.create_review(&details(), request).unwrap_err();
@@ -1596,6 +1605,7 @@ mod tests {
             commit_id: &"a".repeat(40),
             body: "text",
             comments: &[],
+            thread_replies: &[],
         };
         // when
         let err = backend.create_review(&details(), request).unwrap_err();

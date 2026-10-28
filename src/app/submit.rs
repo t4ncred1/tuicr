@@ -23,8 +23,8 @@ impl App {
         skip_confirm: bool,
     ) {
         use crate::forge::submit::{
-            CommentAnchor, InlineComment, ResolverAction, SubmitContext, UnmappableItem,
-            map_comment,
+            CommentAnchor, InlineComment, ResolverAction, SubmitContext, ThreadReplyPost,
+            UnmappableItem, map_comment,
         };
 
         let DiffSource::PullRequest(pr) = &self.diff_source else {
@@ -66,20 +66,37 @@ impl App {
         let thread_replies_supported = self
             .forge_kind()
             .is_some_and(|kind| kind.supports_thread_replies());
-        // A reply to a forge thread posted as a new inline comment would lose
-        // its thread, so where the forge cannot take thread replies it goes
-        // to the resolver instead.
-        let unsupported_thread_reply = |comment: &Comment, file: &DiffFile| {
-            (comment.reply_to_thread.is_some() && !thread_replies_supported).then(|| {
-                UnmappableItem {
-                    comment: comment.clone(),
-                    file: file.display_path().clone(),
-                    reason: crate::forge::submit::UnmappableReason::ThreadReplyUnsupported,
+        let thread_reply_post =
+            |comment: &Comment, thread: &crate::model::ThreadReplyTarget| ThreadReplyPost {
+                comment_id: comment.id.clone(),
+                thread_id: thread.thread_id.clone(),
+                body: format!(
+                    "{}{}",
+                    submit_ctx.posted_tag(&comment.comment_type),
+                    comment.content
+                ),
+            };
+        // An answer to a forge thread goes into that thread. Where the forge
+        // cannot take thread replies it goes to the resolver instead: posted
+        // as a new inline comment it would lose its thread.
+        let route_thread_answer =
+            |comment: &Comment,
+             thread: &crate::model::ThreadReplyTarget,
+             file: &DiffFile|
+             -> std::result::Result<ThreadReplyPost, Box<UnmappableItem>> {
+                if thread_replies_supported {
+                    Ok(thread_reply_post(comment, thread))
+                } else {
+                    Err(Box::new(UnmappableItem {
+                        comment: comment.clone(),
+                        file: file.display_path().clone(),
+                        reason: crate::forge::submit::UnmappableReason::ThreadReplyUnsupported,
+                    }))
                 }
-            })
-        };
+            };
 
         let mut mappable: Vec<InlineComment> = Vec::new();
+        let mut thread_replies: Vec<ThreadReplyPost> = Vec::new();
         let mut unmappable: Vec<UnmappableItem> = Vec::new();
         let mut total_local_drafts = 0_usize;
 
@@ -98,8 +115,11 @@ impl App {
                     continue;
                 }
                 total_local_drafts += 1;
-                if let Some(item) = unsupported_thread_reply(comment, file) {
-                    unmappable.push(item);
+                if let Some(thread) = &comment.reply_to_thread {
+                    match route_thread_answer(comment, thread, file) {
+                        Ok(post) => thread_replies.push(post),
+                        Err(item) => unmappable.push(*item),
+                    }
                     continue;
                 }
                 bucket_mapping(
@@ -119,8 +139,11 @@ impl App {
                         continue;
                     }
                     total_local_drafts += 1;
-                    if let Some(item) = unsupported_thread_reply(comment, file) {
-                        unmappable.push(item);
+                    if let Some(thread) = &comment.reply_to_thread {
+                        match route_thread_answer(comment, thread, file) {
+                            Ok(post) => thread_replies.push(post),
+                            Err(item) => unmappable.push(*item),
+                        }
                         continue;
                     }
                     let anchor = if comment.line_range.is_some() {
@@ -140,6 +163,20 @@ impl App {
             }
         }
 
+        // Review-level answers to forge threads (threads with no file anchor)
+        // go into their threads too, never into the review body.
+        if thread_replies_supported {
+            for comment in &self.session.review_comments {
+                if let Some(thread) = &comment.reply_to_thread
+                    && !comment.is_locked()
+                    && submit_ctx.is_postable(&comment.comment_type)
+                {
+                    total_local_drafts += 1;
+                    thread_replies.push(thread_reply_post(comment, thread));
+                }
+            }
+        }
+
         // Approve is the one event that's meaningful with no comments — a
         // bare "LGTM" approval. Every other event needs at least one local
         // draft comment or a review-level comment, otherwise there's
@@ -155,6 +192,7 @@ impl App {
         self.submit_state = Some(SubmitState {
             event,
             mappable,
+            thread_replies,
             unmappable,
             resolver_choices,
             resolver_cursor: 0,
@@ -354,6 +392,7 @@ impl App {
         let in_flight = SubmitInFlightState {
             event: state.event,
             mappable: state.mappable.clone(),
+            thread_replies: state.thread_replies.clone(),
             summary_comment_ids,
             review_comment_ids,
             moved_to_summary_count: summary_items.len(),
@@ -378,6 +417,7 @@ impl App {
         let head_sha = in_flight.head_sha_snapshot.clone();
         let event = in_flight.event;
         let mappable = in_flight.mappable.clone();
+        let thread_replies = in_flight.thread_replies.clone();
         let commit_id = state.commit_id.clone();
         let show_pr_checks = self.show_pr_checks;
         let show_pr_comments = self.show_pr_comments;
@@ -405,6 +445,7 @@ impl App {
                             commit_id: &commit_id,
                             body: &body,
                             comments: &mappable,
+                            thread_replies: &thread_replies,
                         },
                     )
                     .map_err(|e| e.to_string()),
@@ -467,13 +508,16 @@ impl App {
     }
 
     /// The review-level comments `:submit` puts in the review body: those of
-    /// a type it posts (`SubmitContext::is_postable`).
+    /// a type it posts (`SubmitContext::is_postable`), except answers to forge
+    /// threads, which go into their threads.
     pub fn postable_review_comments(&self) -> Vec<crate::model::Comment> {
         let ctx = crate::forge::submit::SubmitContext::new(&self.forge_config, &self.comment_types);
         self.session
             .review_comments
             .iter()
-            .filter(|comment| ctx.is_postable(&comment.comment_type))
+            .filter(|comment| {
+                ctx.is_postable(&comment.comment_type) && comment.reply_to_thread.is_none()
+            })
             .cloned()
             .collect()
     }
@@ -516,7 +560,14 @@ impl App {
         // Post-submit save — captures the lifecycle transitions.
         let _ = self.save_current_session_merging_external();
 
-        let inline_count = in_flight.mappable.len();
+        let inline_count = match in_flight.thread_replies.len() {
+            0 => format!("{} inline", in_flight.mappable.len()),
+            replies => format!(
+                "{} inline, {replies} thread repl{}",
+                in_flight.mappable.len(),
+                if replies == 1 { "y" } else { "ies" }
+            ),
+        };
         let summary_count = in_flight.moved_to_summary_count;
         let forge_name = self.forge_display_name();
         let message = match in_flight.event {
@@ -527,18 +578,18 @@ impl App {
                 };
                 if pr_url.is_empty() {
                     format!(
-                        "Pushed pending {forge_name} review #{}: {} inline, {} moved to summary",
+                        "Pushed pending {forge_name} review #{}: {}, {} moved to summary",
                         response.id, inline_count, summary_count,
                     )
                 } else {
                     format!(
-                        "Pushed pending {forge_name} review #{}: {} inline, {} moved to summary — Finish it in {forge_name}: {}",
+                        "Pushed pending {forge_name} review #{}: {}, {} moved to summary — Finish it in {forge_name}: {}",
                         response.id, inline_count, summary_count, pr_url,
                     )
                 }
             }
             _ => format!(
-                "Submitted {forge_name} review #{}: {} inline, {} moved to summary",
+                "Submitted {forge_name} review #{}: {}, {} moved to summary",
                 response.id, inline_count, summary_count,
             ),
         };
@@ -574,6 +625,12 @@ impl App {
             .mappable
             .iter()
             .map(|c| c.comment_id.as_str())
+            .chain(
+                in_flight
+                    .thread_replies
+                    .iter()
+                    .map(|r| r.comment_id.as_str()),
+            )
             .chain(in_flight.summary_comment_ids.iter().map(String::as_str))
             .chain(in_flight.review_comment_ids.iter().map(String::as_str))
             .collect();

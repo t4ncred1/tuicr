@@ -24,6 +24,7 @@ use super::review_summaries::{
 };
 use super::review_threads::{build_query, parse_graphql_page};
 use super::submit::build_review_payload;
+use crate::forge::submit::{SubmitEvent, ThreadReplyPost};
 use crate::forge::traits::CreateReviewRequest;
 
 const DEFAULT_GITHUB_HOST: &str = "github.com";
@@ -563,36 +564,16 @@ where
         pr: &PullRequestDetails,
         request: CreateReviewRequest<'_>,
     ) -> Result<GhCreateReviewResponse> {
+        if !request.thread_replies.is_empty() {
+            return self.create_review_with_thread_replies(pr, &request);
+        }
         let payload = build_review_payload(
             request.commit_id,
             request.body,
             request.event,
             request.comments,
         );
-        let payload_json = serde_json::to_string(&payload)?;
-
-        let endpoint = format!(
-            "repos/{}/{}/pulls/{}/reviews",
-            pr.repository.owner, pr.repository.name, pr.number,
-        );
-        let mut args = vec![
-            "api".to_string(),
-            endpoint,
-            "--method".to_string(),
-            "POST".to_string(),
-            "--input".to_string(),
-            "-".to_string(),
-        ];
-        if pr.repository.host != DEFAULT_GITHUB_HOST {
-            args.push("--hostname".to_string());
-            args.push(pr.repository.host.clone());
-        }
-
-        let output = self
-            .runner
-            .run_with_stdin(&args, &payload_json)
-            .map_err(|err| map_create_review_error(err, &pr.repository.host))?;
-
+        let output = self.post_json(pr, reviews_endpoint(pr), "POST", &payload)?;
         parse_create_review_response(&output)
     }
 }
@@ -601,6 +582,134 @@ impl<R> GitHubGhBackend<R>
 where
     R: GhCommandRunner,
 {
+    /// `gh api <endpoint> --method <method>` with `payload` as JSON on stdin.
+    fn post_json(
+        &self,
+        pr: &PullRequestDetails,
+        endpoint: String,
+        method: &str,
+        payload: &serde_json::Value,
+    ) -> Result<String> {
+        let mut args = vec![
+            "api".to_string(),
+            endpoint,
+            "--method".to_string(),
+            method.to_string(),
+            "--input".to_string(),
+            "-".to_string(),
+        ];
+        if pr.repository.host != DEFAULT_GITHUB_HOST {
+            args.push("--hostname".to_string());
+            args.push(pr.repository.host.clone());
+        }
+        self.runner
+            .run_with_stdin(&args, &serde_json::to_string(payload)?)
+            .map_err(|err| map_create_review_error(err, &pr.repository.host))
+    }
+
+    /// A review that also answers existing threads. GitHub's create-review
+    /// call cannot carry thread replies, so the review is built in steps:
+    /// created pending with the inline comments, the replies added to it,
+    /// then published with the event (a draft stays pending). When a step
+    /// fails the pending review is deleted, so no partial review is left
+    /// behind and the caller keeps every comment a local draft.
+    fn create_review_with_thread_replies(
+        &self,
+        pr: &PullRequestDetails,
+        request: &CreateReviewRequest<'_>,
+    ) -> Result<GhCreateReviewResponse> {
+        let pending = build_review_payload(
+            request.commit_id,
+            request.body,
+            SubmitEvent::Draft,
+            request.comments,
+        );
+        let created = self.post_json(pr, reviews_endpoint(pr), "POST", &pending)?;
+        let review = parse_create_review_response(&created)?;
+
+        let finished = self.finish_review_with_thread_replies(pr, request, &created, &review);
+        if finished.is_err() {
+            // Best effort: should the delete fail too, the pending review is
+            // left for the user to discard on GitHub, and the original error
+            // is still the one they need to see.
+            let _ = self.delete_pending_review(pr, review.id);
+        }
+        finished
+    }
+
+    fn finish_review_with_thread_replies(
+        &self,
+        pr: &PullRequestDetails,
+        request: &CreateReviewRequest<'_>,
+        created: &str,
+        review: &GhCreateReviewResponse,
+    ) -> Result<GhCreateReviewResponse> {
+        let created: serde_json::Value = serde_json::from_str(created)?;
+        let review_node_id = created
+            .get("node_id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| {
+                TuicrError::Forge("Create-review response missing `node_id`".to_string())
+            })?;
+        for reply in request.thread_replies {
+            self.add_thread_reply(pr, review_node_id, reply)?;
+        }
+
+        let Some(event) = request.event.github_event() else {
+            return Ok(review.clone());
+        };
+        let mut payload = serde_json::Map::new();
+        payload.insert("event".to_string(), event.into());
+        if !request.body.is_empty() {
+            payload.insert("body".to_string(), request.body.into());
+        }
+        let endpoint = format!("{}/{}/events", reviews_endpoint(pr), review.id);
+        let output = self.post_json(pr, endpoint, "POST", &payload.into())?;
+        parse_create_review_response(&output)
+    }
+
+    /// Adds `reply` to the pending review `review_node_id`, answering its
+    /// thread. `-f` passes every value as a raw string, so a body starting
+    /// with `@` is not read as a file name.
+    fn add_thread_reply(
+        &self,
+        pr: &PullRequestDetails,
+        review_node_id: &str,
+        reply: &ThreadReplyPost,
+    ) -> Result<()> {
+        let mut args = vec![
+            "api".to_string(),
+            "graphql".to_string(),
+            "-f".to_string(),
+            format!("query={ADD_THREAD_REPLY_MUTATION}"),
+            "-f".to_string(),
+            format!("review={review_node_id}"),
+            "-f".to_string(),
+            format!("thread={}", reply.thread_id),
+            "-f".to_string(),
+            format!("body={}", reply.body),
+        ];
+        if pr.repository.host != DEFAULT_GITHUB_HOST {
+            args.push("--hostname".to_string());
+            args.push(pr.repository.host.clone());
+        }
+        self.run_gh(args, &pr.repository.host).map(|_| ())
+    }
+
+    fn delete_pending_review(&self, pr: &PullRequestDetails, review_id: u64) -> Result<()> {
+        let mut args = vec![
+            "api".to_string(),
+            format!("{}/{review_id}", reviews_endpoint(pr)),
+            "--method".to_string(),
+            "DELETE".to_string(),
+        ];
+        if pr.repository.host != DEFAULT_GITHUB_HOST {
+            args.push("--hostname".to_string());
+            args.push(pr.repository.host.clone());
+        }
+        self.run_gh(args, &pr.repository.host).map(|_| ())
+    }
+
     fn build_review_threads_args(
         &self,
         pr: &PullRequestDetails,
@@ -1017,6 +1126,17 @@ fn map_create_review_error(error: GhCommandError, host: &str) -> TuicrError {
         }
     }
     map_gh_error(error, host)
+}
+
+const ADD_THREAD_REPLY_MUTATION: &str = "mutation($review: ID!, $thread: ID!, $body: String!) { \
+    addPullRequestReviewThreadReply(input: {pullRequestReviewId: $review, \
+    pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }";
+
+fn reviews_endpoint(pr: &PullRequestDetails) -> String {
+    format!(
+        "repos/{}/{}/pulls/{}/reviews",
+        pr.repository.owner, pr.repository.name, pr.number,
+    )
 }
 
 /// Parse the GitHub `pulls/<n>/reviews` response into our minimal shape.
@@ -2315,6 +2435,7 @@ Match host github-work
             commit_id: "abcdef1234567890",
             body: "review body",
             comments: &comments,
+            thread_replies: &[],
         };
         // when
         let response = backend.create_review(&details, request).unwrap();
@@ -2364,6 +2485,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap();
@@ -2393,6 +2515,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap();
@@ -2424,6 +2547,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2456,6 +2580,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2481,6 +2606,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2507,6 +2633,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2535,6 +2662,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2566,6 +2694,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2601,6 +2730,7 @@ Match host github-work
                     commit_id: "sha",
                     body: "",
                     comments: &[],
+                    thread_replies: &[],
                 },
             )
             .unwrap_err();
@@ -2610,5 +2740,177 @@ Match host github-work
             "expected unknown-commit hint, got: {msg:?}"
         );
         assert!(msg.contains(":e"), "got: {msg:?}");
+    }
+
+    // thread replies
+
+    /// Each `gh` call's arguments, with its stdin when it had one.
+    type CallLog = Vec<(Vec<String>, Option<String>)>;
+
+    /// Records every call and answers from a queue, in order.
+    struct ScriptedGhRunner {
+        calls: Mutex<CallLog>,
+        results: Mutex<std::collections::VecDeque<GhCommandResult<String>>>,
+    }
+
+    impl ScriptedGhRunner {
+        fn new(results: Vec<GhCommandResult<String>>) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                results: Mutex::new(results.into()),
+            }
+        }
+
+        fn next(&self, args: &[String], stdin: Option<&str>) -> GhCommandResult<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((args.to_vec(), stdin.map(str::to_string)));
+            self.results
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("ScriptedGhRunner: more calls than scripted results")
+        }
+    }
+
+    impl GhCommandRunner for ScriptedGhRunner {
+        fn run(&self, args: &[String]) -> GhCommandResult<String> {
+            self.next(args, None)
+        }
+
+        fn run_with_stdin(&self, args: &[String], stdin: &str) -> GhCommandResult<String> {
+            self.next(args, Some(stdin))
+        }
+    }
+
+    fn review_json(state: &str) -> GhCommandResult<String> {
+        Ok(format!(
+            r#"{{"id": 900, "node_id": "PRR_900", "html_url": "https://github.com/agavra/tuicr/pull/125#pullrequestreview-900", "state": "{state}"}}"#
+        ))
+    }
+
+    fn reply_posts() -> Vec<ThreadReplyPost> {
+        vec![
+            ThreadReplyPost {
+                comment_id: "local-1".into(),
+                thread_id: "PRRT_a".into(),
+                body: "fixed".into(),
+            },
+            ThreadReplyPost {
+                comment_id: "local-2".into(),
+                thread_id: "PRRT_b".into(),
+                body: "@alice see above".into(),
+            },
+        ]
+    }
+
+    fn submit_with_replies(
+        runner: ScriptedGhRunner,
+        event: SubmitEvent,
+    ) -> (Result<GhCreateReviewResponse>, CallLog) {
+        let details = GitHubGhBackend::with_runner(Some(repo()), FakeGhRunner::default())
+            .get_pull_request(parse_pull_request_target("125").unwrap())
+            .unwrap();
+        let backend = GitHubGhBackend::with_runner(Some(repo()), runner);
+        let comments = vec![inline(42, "new comment")];
+        let replies = reply_posts();
+        let result = backend.create_review(
+            &details,
+            CreateReviewRequest {
+                event,
+                commit_id: "abcdef1234567890",
+                body: "summary",
+                comments: &comments,
+                thread_replies: &replies,
+            },
+        );
+        let calls = backend.runner.calls.lock().unwrap().clone();
+        (result, calls)
+    }
+
+    #[test]
+    fn should_create_pending_then_reply_then_publish_when_answering_threads() {
+        let runner = ScriptedGhRunner::new(vec![
+            review_json("PENDING"),
+            Ok("{}".into()),
+            Ok("{}".into()),
+            review_json("COMMENTED"),
+        ]);
+
+        let (result, calls) = submit_with_replies(runner, SubmitEvent::Comment);
+
+        let response = result.unwrap();
+        assert_eq!(response.id, 900);
+        assert_eq!(response.state, "COMMENTED");
+        assert_eq!(calls.len(), 4);
+
+        // 1. pending review: inline comments, no event
+        let (args, stdin) = &calls[0];
+        assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews");
+        let payload: serde_json::Value = serde_json::from_str(stdin.as_deref().unwrap()).unwrap();
+        assert!(payload.get("event").is_none());
+        assert_eq!(payload["comments"][0]["body"], "new comment");
+
+        // 2-3. one GraphQL reply per thread, into the pending review, with
+        // every value passed raw so `@alice` is not read as a file
+        for (call, (thread, body)) in calls[1..3]
+            .iter()
+            .zip([("PRRT_a", "fixed"), ("PRRT_b", "@alice see above")])
+        {
+            let args = &call.0;
+            assert_eq!(&args[..2], ["api", "graphql"]);
+            assert!(args[3].contains("addPullRequestReviewThreadReply"));
+            assert!(args.contains(&"review=PRR_900".to_string()));
+            assert!(args.contains(&format!("thread={thread}")));
+            let body_index = args
+                .iter()
+                .position(|a| *a == format!("body={body}"))
+                .unwrap();
+            assert_eq!(args[body_index - 1], "-f");
+        }
+
+        // 4. publish with the event and body
+        let (args, stdin) = &calls[3];
+        assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews/900/events");
+        let payload: serde_json::Value = serde_json::from_str(stdin.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["event"], "COMMENT");
+        assert_eq!(payload["body"], "summary");
+    }
+
+    #[test]
+    fn should_leave_a_draft_with_thread_replies_pending() {
+        let runner = ScriptedGhRunner::new(vec![
+            review_json("PENDING"),
+            Ok("{}".into()),
+            Ok("{}".into()),
+        ]);
+
+        let (result, calls) = submit_with_replies(runner, SubmitEvent::Draft);
+
+        assert_eq!(result.unwrap().state, "PENDING");
+        assert_eq!(calls.len(), 3, "no publish call for a draft");
+    }
+
+    #[test]
+    fn should_delete_the_pending_review_when_a_thread_reply_fails() {
+        let runner = ScriptedGhRunner::new(vec![
+            review_json("PENDING"),
+            Err(GhCommandError::Failed {
+                status: Some(1),
+                stderr: "GraphQL: Could not resolve to a node with the global id of 'PRRT_a'"
+                    .into(),
+            }),
+            Ok(String::new()),
+        ]);
+
+        let (result, calls) = submit_with_replies(runner, SubmitEvent::Comment);
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("PRRT_a"), "{error}");
+        assert_eq!(calls.len(), 3);
+        let (args, _) = &calls[2];
+        assert_eq!(args[1], "repos/agavra/tuicr/pulls/125/reviews/900");
+        assert!(args.windows(2).any(|w| w == ["--method", "DELETE"]));
     }
 }

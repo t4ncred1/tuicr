@@ -633,6 +633,7 @@ fn make_in_flight(
     SubmitInFlightState {
         event,
         mappable,
+        thread_replies: Vec::new(),
         summary_comment_ids: Vec::new(),
         review_comment_ids: Vec::new(),
         moved_to_summary_count,
@@ -1637,9 +1638,17 @@ fn should_answer_a_forge_thread_with_a_comment_at_its_anchor() {
     assert!(app.replying_to_thread.is_none());
 }
 
+/// Moves the PR under review to `kind`, for forge-specific behaviour.
+fn switch_forge(app: &mut App, kind: crate::forge::traits::ForgeKind) {
+    if let DiffSource::PullRequest(pr) = &mut app.diff_source {
+        pr.key.repository.kind = kind;
+    }
+}
+
 #[test]
 fn should_not_offer_forge_types_for_thread_replies_the_forge_cannot_post() {
     let mut app = pr_app_with_cursor_on_forge_thread();
+    switch_forge(&mut app, crate::forge::traits::ForgeKind::GitLab);
     assert!(app.enter_thread_reply_mode());
 
     app.cycle_comment_type();
@@ -1653,6 +1662,7 @@ fn should_send_a_forge_type_thread_reply_to_the_resolver_when_unsupported() {
     // given a pr-type comment answering a thread, on a forge that cannot
     // take thread replies through submit
     let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    switch_forge(&mut app, crate::forge::traits::ForgeKind::GitLab);
     app.comment_types = forge_routed_comment_types();
     let mut comment = typed_line_comment("pr");
     comment.reply_to_thread = Some(crate::model::ThreadReplyTarget {
@@ -1672,4 +1682,86 @@ fn should_send_a_forge_type_thread_reply_to_the_resolver_when_unsupported() {
         state.unmappable[0].reason,
         UnmappableReason::ThreadReplyUnsupported
     );
+}
+
+fn thread_answer(type_id: &str, thread_id: &str) -> Comment {
+    let mut comment = typed_line_comment(type_id);
+    comment.reply_to_thread = Some(crate::model::ThreadReplyTarget {
+        thread_id: thread_id.into(),
+        comments: Vec::new(),
+    });
+    comment
+}
+
+#[test]
+fn should_offer_forge_types_for_thread_replies_on_github() {
+    let mut app = pr_app_with_cursor_on_forge_thread();
+    assert!(app.enter_thread_reply_mode());
+
+    app.cycle_comment_type();
+
+    assert_eq!(app.comment_type.id(), "pr");
+}
+
+#[test]
+fn should_post_forge_type_thread_answers_into_their_threads_on_github() {
+    // given a pr answer on a line, a pr answer at review level, a claude
+    // answer, and a new pr comment
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    let line_answer = thread_answer("pr", "PRRT_line");
+    let line_answer_id = line_answer.id.clone();
+    add_line_comment(&mut app, "src/lib.rs", 11, line_answer);
+    add_line_comment(
+        &mut app,
+        "src/lib.rs",
+        11,
+        thread_answer("claude", "PRRT_line"),
+    );
+    add_line_comment(&mut app, "src/lib.rs", 11, typed_line_comment("pr"));
+    let mut review_answer = thread_answer("pr", "PRRT_review");
+    review_answer.side = None;
+    review_answer.content = "agreed".to_string();
+    app.session.review_comments.push(review_answer);
+
+    // when
+    app.start_submit(SubmitEvent::Comment);
+
+    // then the pr answers go into their threads, the claude one stays local,
+    // and only the new comment is inline
+    let state = app.submit_state.as_ref().expect("submit state");
+    assert_eq!(state.mappable.len(), 1);
+    let posts: Vec<(&str, &str)> = state
+        .thread_replies
+        .iter()
+        .map(|post| (post.thread_id.as_str(), post.body.as_str()))
+        .collect();
+    assert_eq!(
+        posts,
+        vec![("PRRT_line", "body"), ("PRRT_review", "agreed")]
+    );
+    assert_eq!(state.thread_replies[0].comment_id, line_answer_id);
+    // and the review-level answer stays out of the review body
+    assert!(app.postable_review_comments().is_empty());
+}
+
+#[test]
+fn should_flip_posted_thread_answers_on_submit_success() {
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    let answer = thread_answer("pr", "PRRT_line");
+    let answer_id = answer.id.clone();
+    add_line_comment(&mut app, "src/lib.rs", 11, answer);
+    let mut in_flight = make_in_flight(SubmitEvent::Comment, &[], "abcdef0123", 0);
+    in_flight.thread_replies = vec![crate::forge::submit::ThreadReplyPost {
+        comment_id: answer_id,
+        thread_id: "PRRT_line".into(),
+        body: "body".into(),
+    }];
+
+    app.apply_submit_success(&in_flight, &make_response(77, "", "COMMENTED"));
+
+    let review = app.session.files.get(&PathBuf::from("src/lib.rs")).unwrap();
+    let comment = &review.line_comments[&11][0];
+    assert_eq!(comment.lifecycle_state, CommentLifecycleState::Submitted);
+    assert_eq!(comment.remote_review_id.as_deref(), Some("77"));
 }

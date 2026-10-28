@@ -1146,6 +1146,7 @@ mod tests {
             commit_id: "head111",
             body: "",
             comments: &[inline(10, GhSide::Right)],
+            thread_replies: &[],
         };
         let resp = backend.create_review(&pr_details(), request).unwrap();
         assert_eq!(resp.id, 555);
@@ -1174,6 +1175,7 @@ mod tests {
             commit_id: "head111",
             body: "",
             comments: &[inline(4, GhSide::Left)],
+            thread_replies: &[],
         };
         backend.create_review(&pr_details(), request).unwrap();
         let calls = shared.0.calls.lock().unwrap();
@@ -1196,6 +1198,7 @@ mod tests {
             commit_id: "head111",
             body: "",
             comments: &[],
+            thread_replies: &[],
         };
         let resp = backend.create_review(&pr_details(), request).unwrap();
         assert_eq!(resp.state, "APPROVED");

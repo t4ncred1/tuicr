@@ -775,6 +775,8 @@ pub struct SubmitState {
     pub event: crate::forge::submit::SubmitEvent,
     /// Comments that mapped cleanly to inline GitHub review comments.
     pub mappable: Vec<crate::forge::submit::InlineComment>,
+    /// Comments answering existing forge threads, posted into them.
+    pub thread_replies: Vec<crate::forge::submit::ThreadReplyPost>,
     /// Comments that did not map, paired with the resolver action the user
     /// has chosen for each (defaults to `MoveToSummary` per spec).
     pub unmappable: Vec<crate::forge::submit::UnmappableItem>,
@@ -981,6 +983,9 @@ pub struct SubmitInFlightState {
     /// The mappable inline comments that were sent in the payload. Each
     /// carries the source `Comment.id` so we can locate it post-success.
     pub mappable: Vec<crate::forge::submit::InlineComment>,
+    /// Answers to existing forge threads that were sent, each carrying its
+    /// source `Comment.id`.
+    pub thread_replies: Vec<crate::forge::submit::ThreadReplyPost>,
     /// Source `Comment.id`s of unmappable items the user chose to move into
     /// the review body's "Unplaced comments" section.
     pub summary_comment_ids: Vec<String>,
