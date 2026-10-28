@@ -1217,6 +1217,7 @@ fn should_yank_remote_comment_from_its_anchor_line_or_thread() {
                 created_at: None,
                 in_reply_to: None,
                 url: "https://example.com/comment-1".into(),
+                is_pending: false,
             },
             RemoteReviewComment {
                 id: "comment-2".into(),
@@ -1225,6 +1226,7 @@ fn should_yank_remote_comment_from_its_anchor_line_or_thread() {
                 created_at: None,
                 in_reply_to: Some("comment-1".into()),
                 url: "https://example.com/comment-2".into(),
+                is_pending: false,
             },
         ],
     }];
@@ -1290,6 +1292,7 @@ fn should_yank_rendered_remote_thread_when_hidden_thread_shares_its_anchor() {
         created_at: None,
         in_reply_to: None,
         url: format!("https://example.com/{id}"),
+        is_pending: false,
     };
     let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
     app.forge_review_threads = vec![
@@ -1356,6 +1359,7 @@ fn should_yank_reply_from_multiline_review_level_thread_footer() {
                 created_at: None,
                 in_reply_to: None,
                 url: "https://example.com/root".into(),
+                is_pending: false,
             },
             RemoteReviewComment {
                 id: "reply".into(),
@@ -1364,6 +1368,7 @@ fn should_yank_reply_from_multiline_review_level_thread_footer() {
                 created_at: None,
                 in_reply_to: Some("root".into()),
                 url: "https://example.com/reply".into(),
+                is_pending: false,
             },
         ],
     }];
@@ -1591,6 +1596,7 @@ fn pr_app_with_cursor_on_forge_thread() -> App {
         created_at: None,
         in_reply_to: None,
         url: format!("https://example.com/{id}"),
+        is_pending: false,
     };
     app.forge_review_threads = vec![RemoteReviewThread {
         id: "PRRT_thread".into(),
@@ -1764,4 +1770,35 @@ fn should_flip_posted_thread_answers_on_submit_success() {
     let comment = &review.line_comments[&11][0];
     assert_eq!(comment.lifecycle_state, CommentLifecycleState::Submitted);
     assert_eq!(comment.remote_review_id.as_deref(), Some("77"));
+}
+
+#[test]
+fn should_mark_navigator_rows_of_threads_with_pending_comments() {
+    let mut app = pr_app_with_cursor_on_forge_thread();
+    let published = app.build_comment_navigator_items();
+
+    app.forge_review_threads[0].comments[1].is_pending = true;
+    let with_draft = app.build_comment_navigator_items();
+
+    let remote_kind = |items: &[CommentNavigatorItem]| {
+        items
+            .iter()
+            .find(|item| matches!(item.kind, CommentNavigatorKind::Remote { .. }))
+            .map(|item| item.kind.clone())
+            .expect("remote row")
+    };
+    assert_eq!(
+        remote_kind(&published),
+        CommentNavigatorKind::Remote {
+            muted: false,
+            pending: false
+        }
+    );
+    assert_eq!(
+        remote_kind(&with_draft),
+        CommentNavigatorKind::Remote {
+            muted: false,
+            pending: true
+        }
+    );
 }

@@ -314,6 +314,7 @@ impl AzThread {
                 created_at: c.published_date,
                 in_reply_to: (c.parent_comment_id != 0).then(|| c.parent_comment_id.to_string()),
                 url: String::new(),
+                is_pending: false,
             })
             .collect();
         if comments.is_empty() {

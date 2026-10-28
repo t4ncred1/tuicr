@@ -45,6 +45,11 @@ pub struct RemoteReviewComment {
     pub in_reply_to: Option<String>,
     /// Permalink to the comment on the forge.
     pub url: String,
+    /// Part of a review that is still pending (a draft only its author can
+    /// see), rather than published. Forges that do not report it leave it
+    /// false.
+    #[serde(default)]
+    pub is_pending: bool,
 }
 
 /// State of a remote review at submit time. GitHub exposes one of
@@ -292,6 +297,7 @@ mod tests {
                 created_at: None,
                 in_reply_to: None,
                 url: format!("https://example.com/{id}"),
+                is_pending: false,
             }],
         }
     }

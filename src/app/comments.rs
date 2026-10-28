@@ -169,7 +169,10 @@ impl App {
                 let author = thread.root().and_then(|c| c.author.clone());
                 Some(CommentNavigatorItem {
                     key: CommentNavigatorKey::Remote { thread_idx },
-                    kind: CommentNavigatorKind::Remote { muted },
+                    kind: CommentNavigatorKind::Remote {
+                        muted,
+                        pending: thread.comments.iter().any(|comment| comment.is_pending),
+                    },
                     target_annotation,
                     path: Some(thread.path.clone()),
                     line: thread.line,
@@ -181,7 +184,10 @@ impl App {
                 let summary = self.forge_review_summaries.get(summary_idx)?;
                 Some(CommentNavigatorItem {
                     key: CommentNavigatorKey::RemoteReview { summary_idx },
-                    kind: CommentNavigatorKind::Remote { muted: false },
+                    kind: CommentNavigatorKind::Remote {
+                        muted: false,
+                        pending: false,
+                    },
                     target_annotation,
                     path: None,
                     line: None,

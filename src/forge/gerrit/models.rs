@@ -290,6 +290,7 @@ impl GerritComment {
             created_at: at(&self.updated),
             in_reply_to: self.in_reply_to,
             url,
+            is_pending: false,
         }
     }
 }

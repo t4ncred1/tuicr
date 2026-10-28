@@ -1302,6 +1302,7 @@ fn group_comments_into_threads(comments: Vec<GiteaPullReviewComment>) -> Vec<Rem
             created_at: comment.created_at,
             in_reply_to: None,
             url: comment.html_url,
+            is_pending: false,
         };
 
         let key = (

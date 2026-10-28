@@ -181,6 +181,12 @@ comments (`:submit draft` leaves it pending with them). That works on GitHub;
 on other forges forge types are not offered for thread answers, and any that
 exist go to the submit resolver rather than being posted as separate comments.
 
+Comments you pushed with `:submit draft` sit in a pending review that only you
+can see until it is published. They read `draft`: in the badge of your own
+comments (`[PR draft]`), in the header of the GitHub thread comments they turn
+into after the next fetch (`[github @you draft]`, `↳ @you draft`), and as a `D`
+row in the comment navigator. Your published comments read `posted`.
+
 `e` opens the file at the cursor's line. Terminal editors (`vim`, `nvim`, `nano`, …)
 take over the screen and tuicr reloads the diff once they exit. Windowed editors
 (`code`, `cursor`, `zed`, `subl`, …) open in their own window while tuicr stays on

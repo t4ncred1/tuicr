@@ -1604,7 +1604,11 @@ pub enum CommentNavigatorKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommentNavigatorKind {
     Local(CommentType),
-    Remote { muted: bool },
+    /// `pending`: the thread holds comments of a review not yet published.
+    Remote {
+        muted: bool,
+        pending: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

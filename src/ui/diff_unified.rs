@@ -17,8 +17,8 @@ use crate::model::{FileStatus, LineOrigin, LineRange, LineSide};
 use crate::theme::Theme;
 use crate::ui::comment_panel;
 use crate::ui::diff_view::{
-    apply_horizontal_scroll, comment_box_visible, comment_type_presentation, cursor_indicator,
-    cursor_indicator_spaced, diff_stat_title, hunk_header_text_and_style,
+    apply_horizontal_scroll, comment_box_visible, comment_presentation, comment_type_presentation,
+    cursor_indicator, cursor_indicator_spaced, diff_stat_title, hunk_header_text_and_style,
     paint_cursor_line_highlight, paint_unified_diff_rows_with, paint_visual_selection_overlay,
     populate_row_to_annotation, push_comment_bar, render_expander_line, render_hidden_lines,
     scroll_comment_input_into_view, skip_comment_box, unified_line_bg_style,
@@ -194,7 +194,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
             }
             let comment_lines = comment_panel::format_comment_lines(
                 &app.theme,
-                comment_type_presentation(app, &comment.comment_type),
+                comment_presentation(app, comment),
                 &comment.content,
                 None,
                 comment_width,
@@ -398,7 +398,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                     }
                     let comment_lines = comment_panel::format_comment_lines(
                         &app.theme,
-                        comment_type_presentation(app, &comment.comment_type),
+                        comment_presentation(app, comment),
                         &comment.content,
                         None,
                         comment_width,
@@ -809,10 +809,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                         } else {
                                             let comment_lines = comment_panel::format_comment_lines(
                                                 &app.theme,
-                                                comment_type_presentation(
-                                                    app,
-                                                    &comment.comment_type,
-                                                ),
+                                                comment_presentation(app, comment),
                                                 &comment.content,
                                                 line_range,
                                                 comment_width,
@@ -999,10 +996,7 @@ pub(super) fn render_unified_diff(frame: &mut Frame, app: &mut App, area: Rect) 
                                         } else {
                                             let comment_lines = comment_panel::format_comment_lines(
                                                 &app.theme,
-                                                comment_type_presentation(
-                                                    app,
-                                                    &comment.comment_type,
-                                                ),
+                                                comment_presentation(app, comment),
                                                 &comment.content,
                                                 line_range,
                                                 comment_width,
@@ -1666,6 +1660,7 @@ mod remote_comments_snapshot_tests {
                 created_at: None,
                 in_reply_to: None,
                 url: "https://example.com/x".to_string(),
+                is_pending: false,
             }],
         }
     }
@@ -1712,6 +1707,34 @@ mod remote_comments_snapshot_tests {
             None,
         )
         .expect("build app")
+    }
+
+    #[test]
+    fn should_mark_comments_pushed_to_a_pending_review_and_published_ones() {
+        use crate::model::comment::{Comment, CommentLifecycleState, CommentType};
+
+        let mut app = make_pr_app();
+        app.comment_types = vec![crate::app::CommentTypeDefinition {
+            id: "pr".to_string(),
+            label: "PR".to_string(),
+            definition: None,
+            color: None,
+            forge: true,
+        }];
+        for (content, state) in [
+            ("in the pending review", CommentLifecycleState::PushedDraft),
+            ("already published", CommentLifecycleState::Submitted),
+        ] {
+            let mut comment = Comment::new(content.to_string(), CommentType::from_id("pr"), None);
+            comment.lifecycle_state = state;
+            app.session.review_comments.push(comment);
+        }
+        app.rebuild_annotations();
+
+        let text = body_text(&draw_unified_diff(&mut app));
+
+        assert!(text.contains("[PR draft]"), "{text}");
+        assert!(text.contains("[PR posted]"), "{text}");
     }
 
     fn make_revision_app(diff_files: Vec<DiffFile>) -> App {
@@ -2388,6 +2411,7 @@ mod remote_comments_snapshot_tests {
                 created_at: None,
                 in_reply_to: None,
                 url: String::new(),
+                is_pending: false,
             }],
         }];
         app.rebuild_annotations();
@@ -2421,6 +2445,7 @@ mod remote_comments_snapshot_tests {
                 created_at: None,
                 in_reply_to: None,
                 url: String::new(),
+                is_pending: false,
             }],
         }];
         app.set_remote_comments_visibility(PrCommentsVisibility::Hide);

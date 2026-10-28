@@ -446,6 +446,10 @@ pub fn format_remote_thread_lines(
 
     let badge_style = Style::default().fg(badge_fg).add_modifier(Modifier::BOLD);
     let reply_badge_style = Style::default().fg(badge_fg);
+    // A comment in a still-pending review reads `draft`, in the pending color.
+    let pending_badge_style = Style::default()
+        .fg(theme.pending)
+        .add_modifier(Modifier::BOLD);
     let border_style = Style::default().fg(border_fg);
     let body_style = Style::default().fg(body_fg);
 
@@ -464,6 +468,9 @@ pub fn format_remote_thread_lines(
         let author = comment.author.as_deref().unwrap_or("unknown");
         if is_first {
             let mut badge_text = format!("[{} @{author}", forge_badge_label(forge_kind));
+            if comment.is_pending {
+                badge_text.push_str(" draft");
+            }
             if thread.is_resolved {
                 badge_text.push_str(" resolved");
             } else if thread.is_outdated {
@@ -472,14 +479,26 @@ pub fn format_remote_thread_lines(
             badge_text.push_str("] ");
             result.push(Line::from(vec![
                 Span::styled("    ├── ".to_string(), border_style),
-                Span::styled(badge_text, badge_style),
+                Span::styled(
+                    badge_text,
+                    if comment.is_pending {
+                        pending_badge_style
+                    } else {
+                        badge_style
+                    },
+                ),
                 Span::styled(line_info.clone(), styles::dim_style(theme)),
                 Span::styled("─".repeat(20), border_style),
             ]));
         } else {
+            let (reply_badge, style) = if comment.is_pending {
+                (format!("↳ @{author} draft "), pending_badge_style)
+            } else {
+                (format!("↳ @{author} "), reply_badge_style)
+            };
             result.push(Line::from(vec![
                 Span::styled("    ├── ".to_string(), border_style),
-                Span::styled(format!("↳ @{author} "), reply_badge_style),
+                Span::styled(reply_badge, style),
                 Span::styled("─".repeat(28), border_style),
             ]));
         }
@@ -1307,6 +1326,7 @@ mod tests {
                 created_at: None,
                 in_reply_to: None,
                 url: String::new(),
+                is_pending: false,
             }],
         };
 
@@ -1320,6 +1340,41 @@ mod tests {
 
         assert!(header.contains("[gitlab @alice]"));
         assert!(!header.contains("[github @alice]"));
+    }
+
+    #[test]
+    fn remote_thread_marks_comments_of_a_pending_review_as_draft() {
+        let comment = |id: &str, author: &str, is_pending: bool| {
+            crate::forge::remote_comments::RemoteReviewComment {
+                id: id.to_string(),
+                author: Some(author.to_string()),
+                body: "body".to_string(),
+                created_at: None,
+                in_reply_to: None,
+                url: String::new(),
+                is_pending,
+            }
+        };
+        let thread = crate::forge::remote_comments::RemoteReviewThread {
+            id: "thread".to_string(),
+            path: "src/lib.rs".to_string(),
+            line: Some(1),
+            side: crate::forge::remote_comments::RemoteCommentSide::Right,
+            is_resolved: false,
+            is_outdated: false,
+            comments: vec![comment("c1", "alice", false), comment("c2", "me", true)],
+        };
+
+        let lines =
+            format_remote_thread_lines(&test_theme(), &thread, false, Some(ForgeKind::GitHub));
+        let text: Vec<String> = lines.iter().map(|line| line.to_string()).collect();
+
+        assert!(text[0].contains("[github @alice]"), "{text:#?}");
+        let reply = text
+            .iter()
+            .find(|line| line.contains("@me"))
+            .expect("reply header");
+        assert!(reply.contains("↳ @me draft"), "{text:#?}");
     }
 
     #[test]

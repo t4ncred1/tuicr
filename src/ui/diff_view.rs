@@ -429,6 +429,29 @@ pub(super) fn comment_type_presentation(
     }
 }
 
+/// How a stored comment's badge reads: its type, then where it stands on the
+/// forge once it has left tuicr. A comment pushed into a pending review reads
+/// `draft`, a published one `posted`; local drafts carry no suffix.
+pub(super) fn comment_presentation(
+    app: &App,
+    comment: &crate::model::Comment,
+) -> comment_panel::CommentTypePresentation {
+    use crate::model::comment::CommentLifecycleState;
+
+    let mut presentation = comment_type_presentation(app, &comment.comment_type);
+    let state = match comment.lifecycle_state {
+        CommentLifecycleState::LocalDraft => return presentation,
+        CommentLifecycleState::PushedDraft => "draft",
+        CommentLifecycleState::Submitted => "posted",
+    };
+    if presentation.label.is_empty() {
+        presentation.label = state.to_string();
+    } else {
+        presentation.label = format!("{} {state}", presentation.label);
+    }
+    presentation
+}
+
 /// Adjust scroll_offset so the comment input box is visible in the viewport.
 ///
 /// The input box is rendered inline in the diff view, so without this

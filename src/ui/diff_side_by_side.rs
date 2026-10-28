@@ -14,8 +14,8 @@ use crate::model::{DiffLine, FileStatus, LineOrigin, LineRange, LineSide};
 use crate::theme::Theme;
 use crate::ui::comment_panel;
 use crate::ui::diff_view::{
-    apply_horizontal_scroll, comment_box_row, comment_type_presentation, cursor_indicator,
-    cursor_indicator_spaced, diff_stat_title, hunk_header_text_and_style,
+    apply_horizontal_scroll, comment_box_row, comment_presentation, comment_type_presentation,
+    cursor_indicator, cursor_indicator_spaced, diff_stat_title, hunk_header_text_and_style,
     paint_cursor_line_highlight, paint_visual_selection_overlay, populate_row_to_annotation,
     render_expander_line, render_hidden_lines, scroll_comment_input_into_view, skip_comment_box,
 };
@@ -539,7 +539,7 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
             }
             let comment_lines = comment_panel::format_comment_lines(
                 &app.theme,
-                comment_type_presentation(app, &comment.comment_type),
+                comment_presentation(app, comment),
                 &comment.content,
                 None,
                 ctx.panel_width.saturating_sub(1),
@@ -734,7 +734,7 @@ pub(super) fn render_side_by_side_diff(frame: &mut Frame, app: &mut App, area: R
                     }
                     let comment_lines = comment_panel::format_comment_lines(
                         &app.theme,
-                        comment_type_presentation(app, &comment.comment_type),
+                        comment_presentation(app, comment),
                         &comment.content,
                         None,
                         ctx.panel_width.saturating_sub(1),
@@ -2146,7 +2146,7 @@ fn add_comments_to_line(
                     } else {
                         let comment_lines = comment_panel::format_comment_lines(
                             ctx.theme,
-                            comment_type_presentation(ctx.app, &comment.comment_type),
+                            comment_presentation(ctx.app, comment),
                             &comment.content,
                             line_range,
                             ctx.panel_width.saturating_sub(1),
@@ -2349,6 +2349,7 @@ mod remote_comments_side_by_side_snapshot_tests {
                 created_at: None,
                 in_reply_to: None,
                 url: "https://example.com".to_string(),
+                is_pending: false,
             }],
         }
     }

@@ -69,15 +69,21 @@ fn render_comment_row(app: &App, item: &CommentNavigatorItem) -> Line<'static> {
                 styles::comment_type_style(&app.theme, app.comment_type_color(comment_type)),
             )
         }
-        CommentNavigatorKind::Remote { muted } => {
+        // `D` marks a thread holding draft comments from a pending review.
+        CommentNavigatorKind::Remote { muted, pending } => {
             let style = if *muted {
                 styles::dim_style(&app.theme)
+            } else if *pending {
+                Style::default()
+                    .fg(app.theme.pending)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
                     .fg(app.theme.diff_hunk_header)
                     .add_modifier(Modifier::BOLD)
             };
-            ("R".to_string(), style)
+            let marker = if *pending { "D" } else { "R" };
+            (marker.to_string(), style)
         }
     };
 

@@ -1854,6 +1854,7 @@ mod tests {
                 created_at: None,
                 in_reply_to: None,
                 url: format!("https://github.com/agavra/tuicr/pull/125#discussion_{id}"),
+                is_pending: false,
             }],
         }
     }

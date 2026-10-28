@@ -76,6 +76,9 @@ struct GhReviewComment {
     url: Option<String>,
     #[serde(default)]
     reply_to: Option<GhReplyRef>,
+    /// `PENDING` while the comment belongs to an unpublished review.
+    #[serde(default)]
+    state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +231,7 @@ fn convert_comment(raw: GhReviewComment) -> RemoteReviewComment {
         created_at: raw.created_at,
         in_reply_to: raw.reply_to.map(|r| r.id),
         url: raw.url.unwrap_or_default(),
+        is_pending: raw.state.as_deref() == Some("PENDING"),
     }
 }
 
@@ -258,6 +262,7 @@ pub(crate) fn build_query(after_cursor: Option<&str>) -> String {
               author {{ login }}
               createdAt
               url
+              state
               replyTo {{ id }}
             }}
           }}
@@ -520,6 +525,30 @@ mod tests {
         assert_eq!(thread.root().unwrap().body, "Root");
         let replies: Vec<&str> = thread.replies().map(|c| c.body.as_str()).collect();
         assert_eq!(replies, vec!["Reply 1", "Reply 2"]);
+    }
+
+    #[test]
+    fn should_mark_comments_of_a_pending_review() {
+        // given a published root, a pending reply, and a reply with no state
+        let json = MULTI_COMMENT_THREAD_JSON
+            .replace(
+                r#""body": "Root","#,
+                r#""body": "Root", "state": "SUBMITTED","#,
+            )
+            .replace(
+                r#""body": "Reply 1","#,
+                r#""body": "Reply 1", "state": "PENDING","#,
+            );
+        // when
+        let parsed = parse_graphql_page(&json).unwrap();
+        // then
+        let pending: Vec<bool> = parsed.threads[0]
+            .comments
+            .iter()
+            .map(|comment| comment.is_pending)
+            .collect();
+        assert_eq!(pending, vec![false, true, false]);
+        assert!(build_query(None).contains("state"));
     }
 
     #[test]
