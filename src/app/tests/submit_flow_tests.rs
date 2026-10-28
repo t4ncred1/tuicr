@@ -1573,3 +1573,103 @@ fn should_not_default_to_a_forge_type_outside_pr_reviews() {
 
     assert_eq!(app.comment_type.id(), "claude");
 }
+
+/// A PR app showing one forge thread on line 10, opened by alice and
+/// answered by bob, with the cursor on its first row.
+fn pr_app_with_cursor_on_forge_thread() -> App {
+    use crate::forge::remote_comments::{
+        RemoteCommentSide, RemoteReviewComment, RemoteReviewThread,
+    };
+
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    let remote = |id: &str, author: &str, body: &str| RemoteReviewComment {
+        id: id.into(),
+        author: Some(author.into()),
+        body: body.into(),
+        created_at: None,
+        in_reply_to: None,
+        url: format!("https://example.com/{id}"),
+    };
+    app.forge_review_threads = vec![RemoteReviewThread {
+        id: "PRRT_thread".into(),
+        path: "src/lib.rs".into(),
+        line: Some(10),
+        side: RemoteCommentSide::Right,
+        is_resolved: false,
+        is_outdated: false,
+        comments: vec![
+            remote("c1", "alice", "why is this here?"),
+            remote("c2", "bob", "good question"),
+        ],
+    }];
+    app.rebuild_annotations();
+    app.diff_state.cursor_line = app
+        .line_annotations
+        .iter()
+        .position(|annotation| matches!(annotation, AnnotatedLine::RemoteThreadLine { .. }))
+        .expect("expected a rendered forge thread");
+    app
+}
+
+#[test]
+fn should_answer_a_forge_thread_with_a_comment_at_its_anchor() {
+    // given the cursor on a forge thread
+    let mut app = pr_app_with_cursor_on_forge_thread();
+
+    // when replying to it
+    assert!(app.enter_thread_reply_mode());
+    app.comment_buffer = "Claude, please move this".to_string();
+    app.save_comment();
+
+    // then a comment sits at the thread's line and carries the thread
+    let review = app.session.files.get(&PathBuf::from("src/lib.rs")).unwrap();
+    let comment = &review.line_comments[&10][0];
+    assert_eq!(comment.content, "Claude, please move this");
+    assert_eq!(comment.comment_type.id(), "claude");
+    assert_eq!(comment.side, Some(LineSide::New));
+    let thread = comment.reply_to_thread.as_ref().expect("thread link");
+    assert_eq!(thread.thread_id, "PRRT_thread");
+    assert_eq!(thread.comments.len(), 2);
+    assert_eq!(thread.comments[0].author, "alice");
+    assert_eq!(thread.comments[0].body, "why is this here?");
+    assert_eq!(comment.thread_author(), Some("alice"));
+    assert!(app.replying_to_thread.is_none());
+}
+
+#[test]
+fn should_not_offer_forge_types_for_thread_replies_the_forge_cannot_post() {
+    let mut app = pr_app_with_cursor_on_forge_thread();
+    assert!(app.enter_thread_reply_mode());
+
+    app.cycle_comment_type();
+    assert_eq!(app.comment_type.id(), "none");
+    app.cycle_comment_type();
+    assert_eq!(app.comment_type.id(), "claude");
+}
+
+#[test]
+fn should_send_a_forge_type_thread_reply_to_the_resolver_when_unsupported() {
+    // given a pr-type comment answering a thread, on a forge that cannot
+    // take thread replies through submit
+    let mut app = make_pr_app_with_single_modified_file("src/lib.rs");
+    app.comment_types = forge_routed_comment_types();
+    let mut comment = typed_line_comment("pr");
+    comment.reply_to_thread = Some(crate::model::ThreadReplyTarget {
+        thread_id: "PRRT_thread".into(),
+        comments: Vec::new(),
+    });
+    add_line_comment(&mut app, "src/lib.rs", 11, comment);
+
+    // when
+    app.start_submit(SubmitEvent::Comment);
+
+    // then it is not posted as a new inline comment
+    let state = app.submit_state.as_ref().expect("submit state");
+    assert!(state.mappable.is_empty());
+    assert_eq!(state.unmappable.len(), 1);
+    assert_eq!(
+        state.unmappable[0].reason,
+        UnmappableReason::ThreadReplyUnsupported
+    );
+}

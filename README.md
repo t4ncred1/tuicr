@@ -333,7 +333,7 @@ A first-session cheatsheet. Press `?` inside tuicr for the full reference.
 | `i` / `e` (file tree) | Filter files in / out by regex; narrows the tree **and** the diff |
 | `I` / `E` (file tree) | Clear the include / exclude filter |
 | `c` / `C` | Add line / file comment |
-| `a` | Reply to the comment at cursor (local-only, never posted to a forge) |
+| `a` | Reply to the comment at cursor (local-only, never posted to a forge), or answer the forge thread at cursor |
 | `v` / `V` | Visual mode (range comment) |
 | `r` | Toggle file reviewed |
 | `R` | Toggle hunk reviewed |

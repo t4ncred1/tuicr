@@ -296,6 +296,7 @@ fn format_issue_comment_lines(
         width,
         comment.author.as_deref(),
         &[],
+        None,
     )
 }
 

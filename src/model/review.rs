@@ -324,6 +324,19 @@ impl ReviewSession {
         false
     }
 
+    /// The comment with `comment_id`, wherever it is anchored.
+    pub(crate) fn comment_by_id(&self, comment_id: &str) -> Option<&Comment> {
+        self.review_comments
+            .iter()
+            .chain(self.files.values().flat_map(|review| {
+                review
+                    .file_comments
+                    .iter()
+                    .chain(review.line_comments.values().flatten())
+            }))
+            .find(|comment| comment.id == comment_id)
+    }
+
     pub(crate) fn find_comment_by_id(&self, comment_id: &str) -> Option<CommentLocation> {
         for (index, comment) in self.review_comments.iter().enumerate() {
             if comment.id == comment_id {

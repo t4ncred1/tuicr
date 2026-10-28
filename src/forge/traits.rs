@@ -36,6 +36,12 @@ impl ForgeKind {
             ForgeKind::Gerrit => "Gerrit",
         }
     }
+
+    /// Whether `:submit` can post a reply into one of this forge's existing
+    /// review threads. Elsewhere a thread can still be answered locally.
+    pub fn supports_thread_replies(self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

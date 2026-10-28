@@ -594,7 +594,9 @@ pub(crate) fn markdown_body_lines(
 /// the box border. Callers pass `Some(name)` for non-self comments — the
 /// resulting badge reads `[TYPE @name]`, mirroring the remote forge badge
 /// format used for remote PR threads. `None` keeps the existing neutral
-/// `[TYPE]` badge and theme border.
+/// `[TYPE]` badge and theme border. `thread_author` names who opened the
+/// forge thread the comment answers, shown on the top border.
+#[allow(clippy::too_many_arguments)]
 pub fn format_comment_lines(
     theme: &Theme,
     comment_type: CommentTypePresentation,
@@ -603,6 +605,7 @@ pub fn format_comment_lines(
     width: usize,
     author: Option<&str>,
     replies: &[CommentReply],
+    thread_author: Option<&str>,
 ) -> Vec<Line<'static>> {
     let type_style = styles::comment_type_style(theme, comment_type.color);
     let border_style = match author {
@@ -622,11 +625,15 @@ pub fn format_comment_lines(
     };
     let badge_width = badge_text.width();
 
-    let line_info = match line_range {
+    let mut line_info = match line_range {
         Some(range) if range.is_single() => format!("L{} ", range.start),
         Some(range) => format!("L{}-L{} ", range.start, range.end),
         None => String::new(),
     };
+    // On the top border, so a reply to a forge thread costs no extra row.
+    if let Some(name) = thread_author {
+        line_info.push_str(&format!("↪ @{name} "));
+    }
 
     // "    │  " is the per-line content prefix; everything past that is content.
     // Subtract two extra: one so ratatui never wraps an exact-fit line, and
@@ -784,6 +791,7 @@ mod tests {
                     viewport_width.saturating_sub(1),
                     None,
                     &comment.replies,
+                    comment.thread_author(),
                 );
                 assert_eq!(
                     App::comment_display_lines(&comment, viewport_width),
@@ -1174,6 +1182,35 @@ mod tests {
     }
 
     #[test]
+    fn forge_thread_reply_names_the_thread_on_its_top_border() {
+        let theme = test_theme();
+        let presentation = || CommentTypePresentation {
+            label: "CLAUDE".to_string(),
+            color: Color::Yellow,
+        };
+        let render = |thread_author| {
+            format_comment_lines(
+                &theme,
+                presentation(),
+                "please move this",
+                Some(LineRange::single(10)),
+                80,
+                None,
+                &[],
+                thread_author,
+            )
+        };
+
+        let reply = render(Some("alice"));
+        let plain = render(None);
+
+        assert!(reply[0].to_string().contains("L10 ↪ @alice"), "{reply:#?}");
+        // The marker shares the border row, so heights stay in step with
+        // `App::comment_display_lines`.
+        assert_eq!(reply.len(), plain.len());
+    }
+
+    #[test]
     fn reply_input_shows_the_thread_above_the_cursor() {
         let theme = test_theme();
         let mut comment = crate::model::Comment::new(
@@ -1228,6 +1265,7 @@ mod tests {
             80,
             None,
             &[],
+            None,
         );
         // Header + footer wrap the body; reconstruct must round-trip the text.
         assert_eq!(reconstruct(&lines), content);

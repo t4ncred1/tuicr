@@ -1712,16 +1712,11 @@ fn edit_comment_at_cursor(app: &mut App, cursor_at_end: bool) {
 }
 
 /// Replies are local-only, so unlike editing this works on a comment already
-/// pushed to the forge. Remote threads are not local comments and cannot be
-/// answered here.
+/// pushed to the forge. On a forge thread it starts a new comment answering
+/// that thread instead.
 fn reply_to_comment_at_cursor(app: &mut App) {
-    if !app.enter_reply_mode() {
-        if app.cursor_on_remote_thread() {
-            let forge = app.forge_display_name();
-            app.set_message(format!("{forge} comment — read only in tuicr"));
-        } else {
-            app.set_message("No comment at cursor");
-        }
+    if !app.enter_reply_mode() && !app.enter_thread_reply_mode() {
+        app.set_message("No comment at cursor");
     }
 }
 

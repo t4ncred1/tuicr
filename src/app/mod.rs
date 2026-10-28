@@ -1239,6 +1239,9 @@ pub struct App {
     /// The comment input is answering `editing_comment_id` rather than
     /// editing it: saving appends a reply instead of replacing the content.
     pub replying_to_comment: bool,
+    /// The forge thread the comment being composed answers: set by `a` on a
+    /// forge thread, attached to the comment when it is saved.
+    pub replying_to_thread: Option<crate::model::ThreadReplyTarget>,
 
     /// Set for a `--branch` review: reloads resolve the branch's commits again.
     pub branch_review: Option<BranchReview>,

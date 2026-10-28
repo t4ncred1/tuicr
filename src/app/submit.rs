@@ -63,6 +63,21 @@ impl App {
         };
 
         let submit_ctx = SubmitContext::new(&self.forge_config, &self.comment_types);
+        let thread_replies_supported = self
+            .forge_kind()
+            .is_some_and(|kind| kind.supports_thread_replies());
+        // A reply to a forge thread posted as a new inline comment would lose
+        // its thread, so where the forge cannot take thread replies it goes
+        // to the resolver instead.
+        let unsupported_thread_reply = |comment: &Comment, file: &DiffFile| {
+            (comment.reply_to_thread.is_some() && !thread_replies_supported).then(|| {
+                UnmappableItem {
+                    comment: comment.clone(),
+                    file: file.display_path().clone(),
+                    reason: crate::forge::submit::UnmappableReason::ThreadReplyUnsupported,
+                }
+            })
+        };
 
         let mut mappable: Vec<InlineComment> = Vec::new();
         let mut unmappable: Vec<UnmappableItem> = Vec::new();
@@ -83,6 +98,10 @@ impl App {
                     continue;
                 }
                 total_local_drafts += 1;
+                if let Some(item) = unsupported_thread_reply(comment, file) {
+                    unmappable.push(item);
+                    continue;
+                }
                 bucket_mapping(
                     map_comment(comment, CommentAnchor::FileLevel, file, submit_ctx),
                     &mut mappable,
@@ -100,6 +119,10 @@ impl App {
                         continue;
                     }
                     total_local_drafts += 1;
+                    if let Some(item) = unsupported_thread_reply(comment, file) {
+                        unmappable.push(item);
+                        continue;
+                    }
                     let anchor = if comment.line_range.is_some() {
                         CommentAnchor::Range
                     } else {

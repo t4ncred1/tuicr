@@ -679,6 +679,10 @@ struct CommentOutput {
     /// so the shape of an unanswered comment is unchanged.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     replies: Vec<ReplyOutput>,
+    /// The forge review thread this comment answers, with a copy of the
+    /// thread's comments. Omitted for ordinary comments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to_thread: Option<crate::model::ThreadReplyTarget>,
 }
 
 #[derive(Debug, Serialize)]
@@ -756,6 +760,7 @@ impl CommentOutput {
                 .iter()
                 .map(|reply| ReplyOutput::new(&comment.id, reply))
                 .collect(),
+            reply_to_thread: comment.reply_to_thread.clone(),
         }
     }
 }
@@ -1198,5 +1203,34 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(value["author"], "review-agent");
+    }
+
+    #[test]
+    fn should_show_the_forge_thread_a_comment_answers() {
+        let mut session = ReviewSession::new(
+            PathBuf::from("/repo"),
+            "abc".to_string(),
+            None,
+            crate::model::SessionDiffSource::PullRequest,
+        );
+        let plain = Comment::new("plain".to_string(), CommentType::from_id("claude"), None);
+        let mut reply = Comment::new("on it".to_string(), CommentType::from_id("claude"), None);
+        reply.reply_to_thread = Some(crate::model::ThreadReplyTarget {
+            thread_id: "PRRT_1".to_string(),
+            comments: vec![crate::model::ThreadSnapshotComment {
+                author: "alice".to_string(),
+                body: "why is this here?".to_string(),
+            }],
+        });
+        session.review_comments = vec![plain, reply];
+
+        let value = serde_json::to_value(collect_comments(&session)).unwrap();
+
+        assert!(value[0].get("reply_to_thread").is_none(), "{value:#}");
+        assert_eq!(value[1]["reply_to_thread"]["thread_id"], "PRRT_1");
+        assert_eq!(
+            value[1]["reply_to_thread"]["comments"][0]["body"],
+            "why is this here?"
+        );
     }
 }

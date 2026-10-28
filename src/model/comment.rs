@@ -198,6 +198,28 @@ pub struct Comment {
     /// are local-only and never posted to a forge.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replies: Vec<CommentReply>,
+    /// The forge review thread this comment answers, when it was written as
+    /// a reply to one. The comment itself sits at the thread's anchor like
+    /// any other comment; this records which thread it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to_thread: Option<ThreadReplyTarget>,
+}
+
+/// A forge review thread a comment answers, with the thread's comments as
+/// they read when the answer was written: forge threads are fetched, not
+/// saved, so the copy keeps the conversation readable offline and to agents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadReplyTarget {
+    /// The forge's id for the thread (a GraphQL node id on GitHub).
+    pub thread_id: String,
+    /// The thread's comments, oldest first.
+    pub comments: Vec<ThreadSnapshotComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadSnapshotComment {
+    pub author: String,
+    pub body: String,
 }
 
 /// One answer in a comment's thread. Carries no anchor or type of its own:
@@ -222,6 +244,15 @@ impl CommentReply {
 }
 
 impl Comment {
+    /// Who opened the forge thread this comment answers, if it answers one.
+    pub fn thread_author(&self) -> Option<&str> {
+        let thread = self.reply_to_thread.as_ref()?;
+        thread
+            .comments
+            .first()
+            .map(|comment| comment.author.as_str())
+    }
+
     pub fn new(content: String, comment_type: CommentType, side: Option<LineSide>) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -237,6 +268,7 @@ impl Comment {
             remote_comment_id: None,
             commit_id: None,
             replies: Vec::new(),
+            reply_to_thread: None,
         }
     }
 
@@ -261,6 +293,7 @@ impl Comment {
             remote_comment_id: None,
             commit_id: None,
             replies: Vec::new(),
+            reply_to_thread: None,
         }
     }
 
@@ -562,6 +595,30 @@ mod tests {
             // and the rest of the comment survived
             assert_eq!(comment.id, "legacy");
             assert_eq!(comment.content, "pre-pr5");
+            // and it answers no forge thread
+            assert!(comment.reply_to_thread.is_none());
+        }
+
+        #[test]
+        fn should_roundtrip_a_forge_thread_link_and_omit_it_when_absent() {
+            // given
+            let plain = Comment::new("body".to_string(), CommentType::from_id("issue"), None);
+            let mut reply = plain.clone();
+            reply.reply_to_thread = Some(ThreadReplyTarget {
+                thread_id: "PRRT_1".to_string(),
+                comments: vec![ThreadSnapshotComment {
+                    author: "alice".to_string(),
+                    body: "why?".to_string(),
+                }],
+            });
+            // when
+            let plain_json = serde_json::to_string(&plain).unwrap();
+            let restored: Comment =
+                serde_json::from_str(&serde_json::to_string(&reply).unwrap()).unwrap();
+            // then
+            assert!(!plain_json.contains("reply_to_thread"));
+            assert_eq!(restored.reply_to_thread, reply.reply_to_thread);
+            assert_eq!(restored.thread_author(), Some("alice"));
         }
     }
 }

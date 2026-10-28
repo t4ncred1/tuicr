@@ -216,6 +216,10 @@ pub enum UnmappableReason {
     /// for line comments authored through tuicr today, but we keep the
     /// variant so the resolver can surface a clear message if it ever does.
     LineNotInDiff,
+    /// The comment answers a forge review thread, and this forge cannot take
+    /// thread replies through `:submit`. Posting it as a new inline comment
+    /// would detach it from the thread it answers.
+    ThreadReplyUnsupported,
 }
 
 impl UnmappableReason {
@@ -226,6 +230,7 @@ impl UnmappableReason {
             UnmappableReason::BinaryFile => "binary file",
             UnmappableReason::TooLargeFile => "file too large",
             UnmappableReason::LineNotInDiff => "line not in current diff",
+            UnmappableReason::ThreadReplyUnsupported => "thread reply not supported here",
         }
     }
 }

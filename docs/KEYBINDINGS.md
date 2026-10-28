@@ -159,7 +159,7 @@ Shown below the file tree when local comments or visible remote PR threads exist
 | `dd` | Delete comment at cursor |
 | `i` | Edit comment at cursor (vim: text cursor at start) |
 | `A` | Edit comment at cursor with text cursor at end (vim mode only) |
-| `a` | Reply to the comment at cursor |
+| `a` | Reply to the comment at cursor, or answer the forge thread at cursor |
 | `e` | Open focused file in `$EDITOR` |
 | `y` | Copy review to clipboard |
 | `Y` | Copy the comment at cursor to clipboard |
@@ -170,6 +170,15 @@ thread so far above your reply. Replies are local-only: `:clip` and `:send`
 export them, but `:submit` never posts them, so you can also reply to a comment
 already pushed to a forge. Agents reply the same way with
 `tuicr review add --reply-to <id>`.
+
+On a forge review thread in PR mode, `a` starts a new comment answering that
+thread instead. The comment sits at the thread's line (or file, or review level)
+and keeps a copy of the thread, so agents reading the session see what it
+answers; its box shows `↪ @author` for the thread's author. Use a local type
+(an agent-directed one, or untyped) to keep the answer local. Forge types are
+offered only where `:submit` can post a reply into the thread; elsewhere a
+forge-type answer goes to the submit resolver rather than being posted as a
+separate comment.
 
 `e` opens the file at the cursor's line. Terminal editors (`vim`, `nvim`, `nano`, …)
 take over the screen and tuicr reloads the diff once they exit. Windowed editors

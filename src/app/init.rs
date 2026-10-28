@@ -594,6 +594,7 @@ impl App {
             comment_line: None,
             editing_comment_id: None,
             replying_to_comment: false,
+            replying_to_thread: None,
             branch_review: None,
             visual_selection: None,
             mouse_drag_active: false,

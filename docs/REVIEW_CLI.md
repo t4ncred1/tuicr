@@ -282,3 +282,18 @@ field is omitted when there are none:
 ```
 
 `review add --reply-to` prints that same reply object.
+
+A comment written in the TUI as an answer to a forge review thread (`a` on the
+thread in PR mode) carries `reply_to_thread`: the thread's id and a copy of its
+comments as they read when the answer was written. Ordinary comments omit it:
+
+```json
+"reply_to_thread": {
+  "thread_id": "PRRT_kwDOAbc123",
+  "comments": [
+    { "author": "alice", "body": "Why is this here?" }
+  ]
+}
+```
+
+Reply to such a comment with `--reply-to <id>` like any other.

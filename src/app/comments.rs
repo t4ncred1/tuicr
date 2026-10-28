@@ -1013,6 +1013,7 @@ impl App {
         self.comment_is_review_level = false;
         self.editing_comment_id = None;
         self.replying_to_comment = false;
+        self.replying_to_thread = None;
         self.comment_line_range = None;
     }
 
@@ -1026,6 +1027,7 @@ impl App {
 
         let mut message = "Error: Could not save comment".to_string();
         let mut autosave_error = None;
+        let mut new_comment_id = None;
 
         if self.replying_to_comment
             && let Some(comment_id) = &self.editing_comment_id
@@ -1093,7 +1095,10 @@ impl App {
                 commit_id: None,
             };
             message = match add_comment_to_session(&mut self.session, request) {
-                Ok(_) => "Review comment added".to_string(),
+                Ok(comment) => {
+                    new_comment_id = Some(comment.id);
+                    "Review comment added".to_string()
+                }
                 Err(e) => format!("Error: Could not save comment: {e}"),
             };
         } else if let Some(path) = self.current_file_path().cloned() {
@@ -1129,9 +1134,20 @@ impl App {
                 commit_id: self.commit_id_for_new_comment(),
             };
             message = match add_comment_to_session(&mut self.session, request) {
-                Ok(_) => success_message,
+                Ok(comment) => {
+                    new_comment_id = Some(comment.id);
+                    success_message
+                }
                 Err(e) => format!("Error: Could not save comment: {e}"),
             };
+        }
+
+        if let (Some(id), Some(thread)) = (new_comment_id, self.replying_to_thread.take())
+            && let Some(location) = self.session.find_comment_by_id(&id)
+            && let Some(comment) = self.session.comment_mut(&location)
+        {
+            comment.reply_to_thread = Some(thread);
+            message = "Reply to thread added".to_string();
         }
 
         if !message.starts_with("Error:") {
@@ -1160,12 +1176,88 @@ impl App {
 
     /// The comment types Tab offers here: `forge` types only in PR reviews,
     /// where there is a forge to post them to.
+    ///
+    /// A reply to a forge thread gets them only where `:submit` can post
+    /// thread replies; elsewhere it can still be answered with a local type.
     pub(in crate::app) fn offered_comment_types(&self) -> Vec<&CommentTypeDefinition> {
-        let pr_review = self.is_pull_request_review();
+        let postable = self.is_pull_request_review()
+            && (!self.composing_thread_reply()
+                || self
+                    .forge_kind()
+                    .is_some_and(|kind| kind.supports_thread_replies()));
         self.comment_types
             .iter()
-            .filter(|comment_type| pr_review || !comment_type.forge)
+            .filter(|comment_type| postable || !comment_type.forge)
             .collect()
+    }
+
+    /// Whether the comment being written or edited answers a forge thread.
+    fn composing_thread_reply(&self) -> bool {
+        self.replying_to_thread.is_some()
+            || self
+                .editing_comment_id
+                .as_deref()
+                .and_then(|id| self.session.comment_by_id(id))
+                .is_some_and(|comment| comment.reply_to_thread.is_some())
+    }
+
+    /// Start a comment answering the forge thread under the cursor. The
+    /// comment sits at the thread's anchor (line, file, or review level) and
+    /// keeps a copy of the thread. Returns false when no thread is there.
+    pub fn enter_thread_reply_mode(&mut self) -> bool {
+        use crate::forge::remote_comments::RemoteCommentSide;
+        use crate::model::{ThreadReplyTarget, ThreadSnapshotComment};
+
+        let Some(AnnotatedLine::RemoteThreadLine { thread_idx, .. }) =
+            self.line_annotations.get(self.diff_state.cursor_line)
+        else {
+            return false;
+        };
+        let Some(thread) = self.forge_review_threads.get(*thread_idx) else {
+            return false;
+        };
+        let target = ThreadReplyTarget {
+            thread_id: thread.id.clone(),
+            comments: thread
+                .comments
+                .iter()
+                .map(|comment| ThreadSnapshotComment {
+                    author: comment
+                        .author
+                        .clone()
+                        .unwrap_or_else(|| "ghost".to_string()),
+                    body: comment.body.clone(),
+                })
+                .collect(),
+        };
+        let in_thread_file = !thread.path.is_empty()
+            && self
+                .current_file_path()
+                .is_some_and(|path| path.to_string_lossy() == thread.path);
+        let line = thread.line.map(|line| {
+            let side = match thread.side {
+                RemoteCommentSide::Left => LineSide::Old,
+                RemoteCommentSide::Right => LineSide::New,
+            };
+            (line, side)
+        });
+
+        if in_thread_file {
+            self.enter_comment_mode(line.is_none(), line);
+        } else {
+            self.enter_review_comment_mode();
+        }
+        let author = target
+            .comments
+            .first()
+            .map(|comment| comment.author.clone())
+            .unwrap_or_default();
+        self.replying_to_thread = Some(target);
+        // Entering comment mode picked a default before the thread was set;
+        // pick again so a type the thread cannot take is not the default.
+        self.comment_type = self.default_comment_type();
+        self.set_message(format!("Replying to @{author}'s thread"));
+        true
     }
 
     fn step_comment_type(&mut self, forward: bool) {
