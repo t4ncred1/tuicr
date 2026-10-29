@@ -174,6 +174,9 @@ Treat these comments as the user's review feedback:
 - `issue`: blocking problem to fix first
 - `suggestion`: consider implementing or explain why not
 - `note`: answer or acknowledge
+- `ask`: a question only. Answer it in its thread and leave the code as it
+  is. When the answer points to a fix, describe it and add that the user can
+  comment with type `claude` to have it made.
 - `praise`: no action required
 
 If you are waiting during an active review, poll this command about every 30
